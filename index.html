@@ -1,0 +1,1593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ITBS Rehab Tracker</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0d1117; color: #e6edf3; }
+    #root { min-height: 100vh; }
+    #loader { display: flex; align-items: center; justify-content: center; height: 100vh; font-family: monospace; color: #6b7280; letter-spacing: 2px; }
+  </style>
+</head>
+<body>
+  <div id="root"><div id="loader">LOADING ITBS TRACKER…</div></div>
+
+  <!-- React + ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+  <!-- prop-types (required by Recharts) -->
+  <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+
+  <!-- Recharts (UMD) — stable version -->
+  <script src="https://unpkg.com/recharts@2.9.0/umd/Recharts.js"></script>
+
+  <!-- Babel standalone for JSX -->
+  <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+
+  <script type="text/babel" data-presets="react">
+    // Shim: make Recharts available as a module-like import
+    const {
+      ComposedChart, LineChart, BarChart, Line, Bar,
+      XAxis, YAxis, CartesianGrid, Tooltip,
+      ResponsiveContainer, ReferenceLine, Cell
+    } = Recharts;
+
+    const { useState, useEffect, useCallback, useMemo } = React;
+
+    // ─── CONFIG ────────────────────────────────────────────────────────────
+
+    const INJURY_DATE = '2026-03-24';
+    const HRV_BASELINE = 60;
+    const SHEET_ID = '1W4gds8ZClrWikkKKF27yY6riQnUFPtWKaGEeKbZe4to';
+    const SP = 'itbs:';
+
+    const C = {
+      bg: '#0d1117', surface: '#161b22', surface2: '#1c2128', surface3: '#21262d',
+      border: '#21262d', border2: '#30363d',
+      right: '#f97316', left: '#3b82f6',
+      hrv: '#10b981', warn: '#f59e0b', crit: '#ef4444', muted: '#6b7280',
+      text: '#e6edf3', textDim: '#8b949e',
+    };
+
+    const MONO = "'IBM Plex Mono', 'Courier New', monospace";
+    const SANS = "'IBM Plex Sans', system-ui, sans-serif";
+
+    const EX = {
+      '1A': {
+        name: 'Split Squat Series', track: '1', bilateral: true,
+        levels: [
+          { n: 1, name: 'BW Split Squat', sets: 3, reps: '8/leg' },
+          { n: 2, name: 'Elevated RFESS', sets: 3, reps: '8/leg' },
+          { n: 3, name: 'Single Leg Squat', sets: 3, reps: '8/leg' },
+        ],
+      },
+      '1B': {
+        name: 'Step Up / Step Down', track: '1', bilateral: true,
+        levels: [
+          { n: 1, name: 'Step Up', sets: 3, reps: '10/leg' },
+          { n: 2, name: 'Step Down Eccentric', sets: 3, reps: '10/leg' },
+          { n: '3A', name: 'Single Leg Step Down', sets: 3, reps: '10/leg' },
+          { n: '3B', name: 'Lateral Step Down', sets: 3, reps: '10/leg' },
+        ],
+      },
+      '2A': {
+        name: 'Hamstring Slider Series', track: '2', bilateral: true,
+        levels: [
+          { n: 1, name: 'Single Leg Bridge', sets: 3, reps: '12/leg' },
+          { n: 2, name: 'Hamstring Curl Concentric', sets: 3, reps: '8/leg' },
+          { n: 3, name: 'Hamstring Curl Eccentric', sets: 3, reps: '8/leg' },
+          { n: 4, name: 'Full Nordic Curl Prog.', sets: 3, reps: '6/leg' },
+        ],
+      },
+      '2B': {
+        name: 'Nordic Hamstring Curl', track: '2', bilateral: true,
+        levels: [
+          { n: 1, name: 'Assisted Nordic Curl', sets: 3, reps: '6/leg' },
+          { n: 2, name: 'Nordic Curl', sets: 3, reps: '6/leg' },
+          { n: 3, name: 'Weighted Nordic Curl', sets: 3, reps: '6/leg' },
+        ],
+      },
+      '3A': {
+        name: 'Side Plank Series', track: '3', bilateral: true,
+        levels: [
+          { n: 1, name: 'Standard Side Plank', sets: 3, reps: '30s/side' },
+          { n: 2, name: 'Side Plank Hip Dip', sets: 3, reps: '12/side' },
+          { n: 3, name: 'Side Plank Leg Raise', sets: 3, reps: '12/side' },
+        ],
+      },
+      '3B': {
+        name: 'Band Series', track: '3', bilateral: true,
+        levels: [
+          { n: 1, name: 'Clamshell', sets: 3, reps: '15/side' },
+          { n: 2, name: 'Side-lying Abduction', sets: 3, reps: '15/side' },
+          { n: 3, name: 'Standing Abduction', sets: 3, reps: '15/side' },
+        ],
+      },
+      '4A': {
+        name: 'Calf Raises Straight Knee', track: '4', bilateral: true,
+        levels: [
+          { n: 1, name: 'Bilateral Calf Raise', sets: 3, reps: '20' },
+          { n: 2, name: 'Single Leg Calf Raise', sets: 3, reps: '15/leg' },
+          { n: 3, name: 'SL Calf Raise + Load', sets: 3, reps: '15/leg' },
+        ],
+      },
+      '4B': {
+        name: 'Calf Raises Bent Knee', track: '4', bilateral: true,
+        levels: [
+          { n: 1, name: 'Bilateral Bent Knee CR', sets: 3, reps: '20' },
+          { n: 2, name: 'SL Bent Knee CR', sets: 3, reps: '15/leg' },
+          { n: 3, name: 'SL Bent Knee + Load', sets: 3, reps: '15/leg' },
+        ],
+      },
+    };
+
+    const RUN_WEEKS = [
+      { week: 1, run: 1, walk: 2, reps: 10, freq: 3 },
+      { week: 2, run: 2, walk: 2, reps: 8, freq: 3 },
+      { week: 3, run: 3, walk: 1, reps: 6, freq: 3 },
+      { week: 4, run: null, walk: null, reps: null, freq: 3, desc: 'Continuous running, progressive duration' },
+    ];
+
+    // ─── STORAGE ───────────────────────────────────────────────────────────
+
+    const store = {
+      get(k) {
+        try {
+          const s = (window.storage && typeof window.storage.getItem === 'function') ? window.storage : localStorage;
+          const v = s.getItem(SP + k);
+          return v ? JSON.parse(v) : null;
+        } catch { return null; }
+      },
+      set(k, v) {
+        try {
+          const s = (window.storage && typeof window.storage.setItem === 'function') ? window.storage : localStorage;
+          s.setItem(SP + k, JSON.stringify(v));
+          return true;
+        } catch { return false; }
+      },
+    };
+
+    // ─── DATE UTILS ────────────────────────────────────────────────────────
+
+    const today = () => new Date().toISOString().slice(0, 10);
+    const daysSince = (d) => Math.floor((Date.now() - new Date(d + 'T12:00:00').getTime()) / 86400000);
+    const addDays = (d, n) => {
+      const dt = new Date(d + 'T12:00:00');
+      dt.setDate(dt.getDate() + n);
+      return dt.toISOString().slice(0, 10);
+    };
+    const fmtShort = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—';
+
+    // ─── HRV SYNC ──────────────────────────────────────────────────────────
+
+    async function syncHRV() {
+      const url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQRo0q5gSheb-e2_Jo-s7y6uIf8mcZcEzyjET61oGfDJ_2bybXh0o8FDErqNrysEMCM3fYu2KfGHyzD/pub?gid=1605637632&single=true&output=csv';
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const csv = await resp.text();
+      const lines = csv.trim().split('\n');
+      if (lines.length < 2) throw new Error('Empty sheet');
+      const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+      const idIdx = headers.indexOf('id');
+      const hrvIdx = headers.indexOf('hrv');
+      if (idIdx < 0 || hrvIdx < 0) throw new Error(`Columns missing`);
+      const data = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',');
+        const date = (cols[idIdx] || '').replace(/"/g, '').trim();
+        const hrv = parseFloat((cols[hrvIdx] || '').replace(/"/g, '').trim());
+        if (/^\d{4}-\d{2}-\d{2}$/.test(date) && hrv > 0 && !isNaN(hrv)) {
+          data.push({ date, hrv: Math.round(hrv) });
+        }
+      }
+      return data;
+    }
+
+    // ─── COMPUTATIONS ──────────────────────────────────────────────────────
+
+    function recoveryStatus(checkins, hrvSheet) {
+      const cutoff = addDays(today(), -7);
+      const rec = checkins.filter(c => c.date >= cutoff);
+      const hrvsAll = [];
+      Array.from({ length: 7 }, (_, i) => addDays(today(), -6 + i)).forEach(d => {
+        const ci = rec.find(c => c.date === d);
+        const sh = hrvSheet.find(h => h.date === d);
+        const v = ci?.hrv ?? sh?.hrv;
+        if (v) hrvsAll.push(v);
+      });
+      const avgHRV = hrvsAll.length ? hrvsAll.reduce((a, b) => a + b, 0) / hrvsAll.length : null;
+      const pains = rec.filter(c => c.painR != null && c.painL != null);
+      const avgPain = pains.length ? pains.reduce((a, c) => a + Math.max(c.painR, c.painL), 0) / pains.length : null;
+      if (!avgHRV && avgPain == null) return { label: 'NO DATA', color: C.muted, emoji: '⚪' };
+      const ratio = avgHRV ? avgHRV / HRV_BASELINE : null;
+      if ((ratio && ratio < 0.8) || (avgPain != null && avgPain > 3)) return { label: 'IN THE HOLE', color: C.crit, emoji: '🔴' };
+      if (ratio && ratio >= 0.95 && (avgPain == null || avgPain <= 1)) return { label: 'TRENDING UP', color: C.hrv, emoji: '🟢' };
+      return { label: 'STABILIZING', color: C.warn, emoji: '🟡' };
+    }
+
+    function autoFlags(ci) {
+      if (!ci) return [];
+      const flags = [];
+      const highPain = (ci.painR ?? 0) > 2 || (ci.painL ?? 0) > 2;
+      const highAllo = (ci.workStress ?? 0) >= 4 && (ci.hrv ?? 99) < 50;
+      if (highPain && highAllo) return [{ level: 'crit', msg: 'Recovery deficit: rest or cross-train only' }];
+      if (highPain) flags.push({ level: 'warn', msg: 'Exceeds load threshold — pain >2/10' });
+      if (highAllo) flags.push({ level: 'crit', msg: 'High allostatic load — consider reducing training today' });
+      return flags;
+    }
+
+    function computeInsights(checkins, progression) {
+      const out = [];
+      const sorted = [...checkins].sort((a, b) => b.date.localeCompare(a.date));
+      let rStreak = 0;
+      for (const c of sorted) { if ((c.painR ?? 99) <= 2) rStreak++; else break; }
+      if (rStreak >= 4) out.push(`Right knee pain ≤2 for ${rStreak} days — earliest Week 1 run: ${fmtShort(addDays(today(), 1))}`);
+      else if (rStreak > 0) out.push(`Right knee: ${rStreak} day${rStreak > 1 ? 's' : ''} ≤2/10 — need ${4 - rStreak} more for run eligibility`);
+      else out.push('Right knee pain >2 — run protocol on hold');
+      const r3 = sorted.slice(0, 3);
+      if (r3.length === 3 && r3.every(c => (c.hrv ?? 99) < 50 && (c.workStress ?? 0) >= 4))
+        out.push(`HRV suppressed + work stress ≥4 for 3 days — stress-compounded recovery`);
+      else {
+        const latest = sorted[0];
+        if (latest?.hrv) {
+          const delta = latest.hrv - HRV_BASELINE;
+          out.push(`Latest HRV ${latest.hrv}ms (${delta > 0 ? '+' : ''}${delta} vs ${HRV_BASELINE}ms baseline)`);
+        } else out.push(`Log daily HRV to unlock trend insights`);
+      }
+      const r1A = progression?.['1A_R']?.level ?? 1;
+      const l1A = progression?.['1A_L']?.level ?? 1;
+      if (l1A > r1A) out.push(`Left leg ahead by ${l1A - r1A} level on Split Squat — R is primary, progress conservatively`);
+      else if (r1A > l1A) out.push(`Right leg ahead on Split Squat — unexpected given R severity`);
+      else out.push(`Both legs at Split Squat level ${r1A} — symmetric progression`);
+      return out.slice(0, 3);
+    }
+
+    // ─── SHARED UI ─────────────────────────────────────────────────────────
+
+    function Tip({ active, payload, label }) {
+      if (!active || !payload?.length) return null;
+      return (
+        <div style={{ background: '#0d1117', border: `1px solid ${C.border2}`, padding: '8px 12px', fontSize: 12, fontFamily: MONO }}>
+          <div style={{ color: C.textDim, marginBottom: 4 }}>{label}</div>
+          {payload.map((p, i) => p.value != null && (
+            <div key={i} style={{ color: p.color || C.text }}>{p.name}: {p.value}</div>
+          ))}
+        </div>
+      );
+    }
+
+    function MetricCard({ label, value, unit, sub, color, animate }) {
+      const [disp, setDisp] = useState(animate && typeof value === 'number' ? 0 : value);
+      useEffect(() => {
+        if (!animate || typeof value !== 'number') { setDisp(value); return; }
+        if (value === 0) { setDisp(0); return; }
+        let cur = 0;
+        const step = Math.max(1, Math.ceil(value / 30));
+        const t = setInterval(() => {
+          cur += step;
+          if (cur >= value) { setDisp(value); clearInterval(t); }
+          else setDisp(cur);
+        }, 20);
+        return () => clearInterval(t);
+      }, [value]);
+      return (
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: '12px 16px', minWidth: 110 }}>
+          <div style={{ fontSize: 10, color: C.textDim, textTransform: 'uppercase', letterSpacing: 1, fontFamily: SANS, marginBottom: 4 }}>{label}</div>
+          <div style={{ fontSize: 26, fontFamily: MONO, color: color || C.text, lineHeight: 1 }}>
+            {disp ?? '—'}
+            {unit && <span style={{ fontSize: 12, color: C.textDim, marginLeft: 3 }}>{unit}</span>}
+          </div>
+          {sub && <div style={{ fontSize: 10, color: C.textDim, marginTop: 3, fontFamily: SANS }}>{sub}</div>}
+        </div>
+      );
+    }
+
+    function FlagBanner({ flags }) {
+      return flags.map((f, i) => (
+        <div key={i} style={{
+          background: f.level === 'crit' ? '#ef444420' : '#f59e0b18',
+          border: `1px solid ${f.level === 'crit' ? C.crit : C.warn}`,
+          padding: '9px 14px', fontSize: 12, fontFamily: MONO,
+          color: f.level === 'crit' ? C.crit : C.warn,
+          display: 'flex', alignItems: 'center', gap: 8
+        }}>
+          <span>{f.level === 'crit' ? '⚠' : '△'}</span> {f.msg}
+        </div>
+      ));
+    }
+
+    function Btn({ children, onClick, active, color, small, disabled }) {
+      return (
+        <button onClick={onClick} disabled={disabled} style={{
+          background: active ? (color || C.border2) : 'transparent',
+          border: `1px solid ${active ? (color || C.border2) : C.border}`,
+          color: active ? C.text : C.textDim,
+          padding: small ? '4px 10px' : '8px 16px',
+          fontSize: small ? 11 : 13, fontFamily: MONO,
+          cursor: disabled ? 'default' : 'pointer',
+          borderRadius: 2, opacity: disabled ? 0.4 : 1,
+        }}>
+          {children}
+        </button>
+      );
+    }
+
+    // ─── DASHBOARD ─────────────────────────────────────────────────────────
+
+    function Dashboard({ checkins, hrvSheet }) {
+      const td = today();
+      const todayCI = checkins.find(c => c.date === td);
+      const daysInj = daysSince(INJURY_DATE);
+      const todayHRV = todayCI?.hrv ?? hrvSheet.find(h => h.date === td)?.hrv ?? null;
+      const hrvDelta = todayHRV != null ? todayHRV - HRV_BASELINE : null;
+      const recov = useMemo(() => recoveryStatus(checkins, hrvSheet), [checkins, hrvSheet]);
+      const ins = useMemo(() => computeInsights(checkins, {}), [checkins]);
+      const flags = useMemo(() => autoFlags(todayCI), [todayCI]);
+
+      const chartData = useMemo(() => {
+        const dates = Array.from({ length: 30 }, (_, i) => addDays(td, -29 + i));
+        return dates.map((date, idx) => {
+          const ci = checkins.find(c => c.date === date);
+          const sh = hrvSheet.find(h => h.date === date);
+          const hrv = ci?.hrv ?? sh?.hrv ?? null;
+          const window7 = dates.slice(Math.max(0, idx - 6), idx + 1);
+          const vals = window7.map(d => {
+            const c2 = checkins.find(c => c.date === d);
+            const s2 = hrvSheet.find(h => h.date === d);
+            return c2?.hrv ?? s2?.hrv ?? null;
+          }).filter(Boolean);
+          const hrv7 = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+          return { label: fmtShort(date), hrv, hrv7, stress: ci?.workStress ?? null };
+        });
+      }, [checkins, hrvSheet, td]);
+
+      const painData = useMemo(() => {
+        return Array.from({ length: 14 }, (_, i) => {
+          const date = addDays(td, -13 + i);
+          const ci = checkins.find(c => c.date === date);
+          return { label: fmtShort(date), painR: ci?.painR ?? null, painL: ci?.painL ?? null };
+        });
+      }, [checkins, td]);
+
+      const weekLoad = useMemo(() => {
+        const types = [
+          { type: 'Run', color: C.hrv, count: 0 },
+          { type: 'Cross', color: C.left, count: 0 },
+          { type: 'Rest', color: C.muted, count: 0 },
+          { type: 'Physio', color: C.warn, count: 0 },
+        ];
+        Array.from({ length: 7 }, (_, i) => addDays(td, -6 + i)).forEach(d => {
+          const ci = checkins.find(c => c.date === d);
+          if (ci?.activityType === 'Run') types[0].count++;
+          else if (ci?.activityType === 'Cross-train') types[1].count++;
+          else if (ci?.activityType === 'Rest') types[2].count++;
+          else if (ci?.activityType === 'Physio session') types[3].count++;
+        });
+        return types;
+      }, [checkins, td]);
+
+      const hrvColor = todayHRV == null ? C.muted
+        : todayHRV >= HRV_BASELINE * 0.95 ? C.hrv
+        : todayHRV >= HRV_BASELINE * 0.8 ? C.warn : C.crit;
+
+      return (
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <FlagBanner flags={flags} />
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <MetricCard label="Days Since Injury" value={daysInj} sub={`Onset ${INJURY_DATE}`} color={C.textDim} animate />
+            <MetricCard label="HRV Today" value={todayHRV} unit="ms"
+              sub={hrvDelta != null ? `${hrvDelta > 0 ? '+' : ''}${hrvDelta}ms vs baseline` : `Baseline: ${HRV_BASELINE}ms`}
+              color={hrvColor} animate />
+            <MetricCard label="Pain (R)" value={todayCI?.painR} unit="/10" sub="Right knee — primary"
+              color={todayCI?.painR > 5 ? C.crit : todayCI?.painR > 2 ? C.warn : C.right} animate />
+            <MetricCard label="Pain (L)" value={todayCI?.painL} unit="/10" sub="Left knee — secondary"
+              color={todayCI?.painL > 5 ? C.crit : todayCI?.painL > 2 ? C.warn : C.left} animate />
+            <MetricCard label="Work Stress" value={todayCI?.workStress} unit="/5"
+              color={todayCI?.workStress >= 4 ? C.crit : todayCI?.workStress >= 3 ? C.warn : C.hrv} animate />
+            <div style={{
+              background: C.surface, border: `2px solid ${recov.color}`,
+              padding: '10px 18px', display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center', gap: 4, minWidth: 130
+            }}>
+              <div style={{ fontSize: 26 }}>{recov.emoji}</div>
+              <div style={{ fontSize: 10, color: recov.color, fontFamily: MONO, letterSpacing: 2, textAlign: 'center' }}>{recov.label}</div>
+              <div style={{ fontSize: 9, color: C.textDim, fontFamily: SANS }}>7-day composite</div>
+            </div>
+          </div>
+
+          {/* HRV chart */}
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: 16 }}>
+            <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>
+              HRV 30-Day + Work Stress Overlay
+            </div>
+            <ResponsiveContainer width="100%" height={170}>
+              <ComposedChart data={chartData} margin={{ left: 0, right: 30, top: 5, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 9, fill: C.textDim, fontFamily: MONO }} interval={4} />
+                <YAxis yAxisId="h" domain={[20, 100]} tick={{ fontSize: 9, fill: C.textDim, fontFamily: MONO }} width={30} />
+                <YAxis yAxisId="s" orientation="right" domain={[0, 6]} tick={{ fontSize: 9, fill: C.muted, fontFamily: MONO }} width={20} />
+                <Tooltip content={<Tip />} />
+                <ReferenceLine yAxisId="h" y={HRV_BASELINE} stroke={C.warn} strokeDasharray="5 3" strokeWidth={1} />
+                <Line yAxisId="h" dataKey="hrv" name="HRV" stroke={C.hrv} strokeWidth={1.5} dot={false} connectNulls={false} />
+                <Line yAxisId="h" dataKey="hrv7" name="7d avg" stroke={C.hrv + '66'} strokeWidth={1} dot={false} strokeDasharray="4 3" connectNulls />
+                <Line yAxisId="s" dataKey="stress" name="Stress" stroke={C.muted} strokeWidth={1} dot={false} connectNulls={false} opacity={0.7} />
+              </ComposedChart>
+            </ResponsiveContainer>
+            <div style={{ display: 'flex', gap: 16, marginTop: 6 }}>
+              {[['HRV', C.hrv], ['7d avg', C.hrv + '66'], ['Stress', C.muted], [`Baseline ${HRV_BASELINE}ms`, C.warn]].map(([l, c]) => (
+                <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <div style={{ width: 16, height: 2, background: c }} />
+                  <span style={{ fontSize: 10, color: C.textDim, fontFamily: SANS }}>{l}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Pain chart */}
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: 16 }}>
+            <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>
+              Pain Trend 14 Days — <span style={{ color: C.right }}>R Right</span> / <span style={{ color: C.left }}>L Left</span>
+            </div>
+            <ResponsiveContainer width="100%" height={150}>
+              <ComposedChart data={painData} margin={{ left: 0, right: 10, top: 5, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 9, fill: C.textDim, fontFamily: MONO }} interval={1} />
+                <YAxis domain={[0, 10]} tick={{ fontSize: 9, fill: C.textDim, fontFamily: MONO }} width={25} />
+                <Tooltip content={<Tip />} />
+                <ReferenceLine y={2} stroke={C.warn} strokeDasharray="4 2" strokeWidth={1} />
+                <Line dataKey="painR" name="Pain (R)" stroke={C.right} strokeWidth={2} dot={{ r: 3, fill: C.right }} connectNulls={false} />
+                <Line dataKey="painL" name="Pain (L)" stroke={C.left} strokeWidth={2} dot={{ r: 3, fill: C.left }} connectNulls={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Weekly load */}
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: 16 }}>
+            <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>
+              Weekly Load (Last 7 Days)
+            </div>
+            <ResponsiveContainer width="100%" height={110}>
+              <BarChart data={weekLoad} margin={{ left: 0, right: 10, top: 5, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+                <XAxis dataKey="type" tick={{ fontSize: 11, fill: C.textDim, fontFamily: SANS }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 9, fill: C.textDim, fontFamily: MONO }} width={25} />
+                <Tooltip content={<Tip />} />
+                <Bar dataKey="count" name="Sessions" radius={0}>
+                  {weekLoad.map((e, i) => <Cell key={i} fill={e.color} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Insights */}
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: 16 }}>
+            <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>
+              Auto-Insights
+            </div>
+            {ins.map((txt, i) => (
+              <div key={i} style={{
+                padding: '8px 12px', borderLeft: `3px solid ${C.hrv}`,
+                background: C.surface2, marginBottom: 8,
+                fontSize: 12, color: C.text, fontFamily: MONO, lineHeight: 1.6
+              }}>{txt}</div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── CHECK-IN ──────────────────────────────────────────────────────────
+
+    function CheckIn({ checkins, setCheckins, hrvSheet }) {
+      const td = today();
+      const existing = checkins.find(c => c.date === td);
+      const sheetHRV = hrvSheet.find(h => h.date === td)?.hrv ?? null;
+
+      const [form, setForm] = useState(() => existing || {
+        date: td, hrv: sheetHRV, hrvManual: false,
+        workStress: null, painR: 0, painL: 0, activityType: null, notes: ''
+      });
+
+      useEffect(() => {
+        if (existing) setForm(existing);
+      }, [td]);
+
+      const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+      const flags = autoFlags(form);
+
+      const save = () => {
+        const next = checkins.filter(c => c.date !== td);
+        const updated = [...next, { ...form, date: td }].sort((a, b) => a.date.localeCompare(b.date));
+        setCheckins(updated);
+        store.set('checkins', updated);
+      };
+
+      const LabelRow = ({ children }) => (
+        <div style={{ fontSize: 11, color: C.textDim, fontFamily: SANS, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+          {children}
+        </div>
+      );
+      const Field = ({ children }) => (
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: '14px 16px' }}>
+          {children}
+        </div>
+      );
+      const painColor = (v) => v > 5 ? C.crit : v > 2 ? C.warn : C.hrv;
+
+      return (
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 640 }}>
+          <FlagBanner flags={flags} />
+
+          <Field>
+            <LabelRow>Date</LabelRow>
+            <div style={{ fontFamily: MONO, fontSize: 18, color: C.text }}>{td}</div>
+          </Field>
+
+          <Field>
+            <LabelRow>HRV (ms) {sheetHRV && !form.hrvManual ? '— auto from Sheets' : form.hrvManual ? '— manual override' : ''}</LabelRow>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <input type="number" min={0} max={200} value={form.hrv ?? ''}
+                onChange={e => { set('hrv', e.target.value ? Number(e.target.value) : null); set('hrvManual', true); }}
+                style={{ background: C.surface2, border: `1px solid ${C.border2}`, color: C.text, fontFamily: MONO, fontSize: 24, padding: '6px 10px', width: 90, borderRadius: 2 }}
+              />
+              <span style={{ fontFamily: MONO, fontSize: 13, color: C.textDim }}>ms</span>
+              {form.hrv != null && (
+                <span style={{ fontSize: 11, fontFamily: MONO, color: form.hrv >= HRV_BASELINE ? C.hrv : form.hrv >= HRV_BASELINE * 0.8 ? C.warn : C.crit }}>
+                  {form.hrv >= HRV_BASELINE ? '+' : ''}{form.hrv - HRV_BASELINE} vs baseline
+                </span>
+              )}
+              {sheetHRV && form.hrvManual && (
+                <Btn small onClick={() => { set('hrv', sheetHRV); set('hrvManual', false); }}>
+                  Reset to sheet ({sheetHRV})
+                </Btn>
+              )}
+            </div>
+          </Field>
+
+          <Field>
+            <LabelRow>Work Stress (1–5)</LabelRow>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {[[1, '😌', 'Calm'], [2, '🙂', 'Easy'], [3, '😐', 'Moderate'], [4, '😓', 'Stressed'], [5, '😤', 'Overloaded']].map(([v, icon, label]) => (
+                <button key={v} onClick={() => set('workStress', v)} style={{
+                  background: form.workStress === v ? C.border2 : 'transparent',
+                  border: `1px solid ${form.workStress === v ? C.warn : C.border}`,
+                  color: C.text, padding: '8px 12px', cursor: 'pointer', borderRadius: 2,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                  opacity: form.workStress && form.workStress !== v ? 0.4 : 1,
+                }}>
+                  <span style={{ fontSize: 22 }}>{icon}</span>
+                  <span style={{ fontSize: 9, fontFamily: SANS, color: C.textDim }}>{label}</span>
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          <Field>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <LabelRow>Pain — RIGHT Knee (0–10)</LabelRow>
+              <span style={{ fontSize: 10, color: C.right, fontFamily: MONO, letterSpacing: 1 }}>● PRIMARY</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <input type="range" min={0} max={10} value={form.painR}
+                onChange={e => set('painR', Number(e.target.value))}
+                style={{ flex: 1, accentColor: C.right }} />
+              <div style={{
+                width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: painColor(form.painR) + '22', border: `2px solid ${painColor(form.painR)}`,
+                fontFamily: MONO, fontSize: 20, color: painColor(form.painR), borderRadius: 2
+              }}>{form.painR}</div>
+            </div>
+            {form.painR > 2 && <div style={{ fontSize: 11, color: C.warn, fontFamily: MONO, marginTop: 6 }}>▲ Exceeds 2/10 threshold</div>}
+          </Field>
+
+          <Field>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <LabelRow>Pain — LEFT Knee (0–10)</LabelRow>
+              <span style={{ fontSize: 10, color: C.left, fontFamily: MONO, letterSpacing: 1 }}>● SECONDARY</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <input type="range" min={0} max={10} value={form.painL}
+                onChange={e => set('painL', Number(e.target.value))}
+                style={{ flex: 1, accentColor: C.left }} />
+              <div style={{
+                width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: painColor(form.painL) + '22', border: `2px solid ${painColor(form.painL)}`,
+                fontFamily: MONO, fontSize: 20, color: painColor(form.painL), borderRadius: 2
+              }}>{form.painL}</div>
+            </div>
+            {form.painL > 2 && <div style={{ fontSize: 11, color: C.warn, fontFamily: MONO, marginTop: 6 }}>▲ Exceeds 2/10 threshold</div>}
+          </Field>
+
+          <Field>
+            <LabelRow>Activity Type</LabelRow>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {['Run', 'Cross-train', 'Rest', 'Physio session'].map(type => (
+                <Btn key={type} active={form.activityType === type} onClick={() => set('activityType', type)}>{type}</Btn>
+              ))}
+            </div>
+          </Field>
+
+          <Field>
+            <LabelRow>Notes</LabelRow>
+            <textarea value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Free text…"
+              style={{ width: '100%', background: C.surface2, border: `1px solid ${C.border2}`, color: C.text, fontFamily: SANS, fontSize: 13, padding: '8px 10px', resize: 'vertical', minHeight: 60, boxSizing: 'border-box', borderRadius: 2 }}
+            />
+          </Field>
+
+          <button onClick={save} style={{
+            background: '#1f6feb', border: 'none', color: '#fff',
+            padding: '12px 24px', fontSize: 13, fontFamily: MONO,
+            cursor: 'pointer', borderRadius: 2, letterSpacing: 1
+          }}>SAVE CHECK-IN</button>
+          {existing && <div style={{ fontSize: 11, color: C.textDim, fontFamily: SANS }}>Updating existing entry for {td}</div>}
+        </div>
+      );
+    }
+
+    // ─── EXERCISES ─────────────────────────────────────────────────────────
+
+    function Exercises({ exerciseLog, setExerciseLog, progression, setProgression }) {
+      const td = today();
+      const todayLog = (exerciseLog.find(e => e.date === td) || {}).completions || {};
+
+      const toggleDone = (track, leg) => {
+        const key = `${track}_${leg}`;
+        const current = (todayLog[key] || {}).done || false;
+        const level = (progression[key] || { level: 1 }).level;
+        const existing = exerciseLog.find(e => e.date === td);
+        const updatedCompletions = { ...(existing?.completions || {}), [key]: { done: !current, level } };
+        const newLog = [...exerciseLog.filter(e => e.date !== td), { date: td, completions: updatedCompletions }]
+          .sort((a, b) => a.date.localeCompare(b.date));
+        setExerciseLog(newLog);
+        store.set('exerciseLog', newLog);
+
+        if (!current) {
+          let streak = 1;
+          let d = addDays(td, -1);
+          for (let i = 0; i < 10; i++) {
+            const prev = newLog.find(e => e.date === d);
+            const pd = (prev?.completions || {})[key];
+            if (pd?.done && pd?.level === level) { streak++; d = addDays(d, -1); }
+            else break;
+          }
+          const newProg = { ...progression, [key]: { level, streak } };
+          setProgression(newProg);
+          store.set('progression', newProg);
+        } else {
+          const cur = progression[key] || { level: 1, streak: 0 };
+          const newProg = { ...progression, [key]: { ...cur, streak: Math.max(0, cur.streak - 1) } };
+          setProgression(newProg);
+          store.set('progression', newProg);
+        }
+      };
+
+      const advanceLevel = (track, leg) => {
+        const key = `${track}_${leg}`;
+        const cur = progression[key] || { level: 1, streak: 0 };
+        const maxLevel = EX[track].levels.length;
+        if (cur.level >= maxLevel) return;
+        const newProg = { ...progression, [key]: { level: cur.level + 1, streak: 0 } };
+        setProgression(newProg);
+        store.set('progression', newProg);
+      };
+
+      return (
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontSize: 11, color: C.textDim, fontFamily: SANS }}>
+            E3 Rehab — Compression Model. 3 consecutive completions per leg unlocks next level.
+          </div>
+          {Object.entries(EX).map(([id, def]) => (
+            <div key={id} style={{ background: C.surface, border: `1px solid ${C.border}` }}>
+              <div style={{
+                padding: '10px 14px', background: C.surface2,
+                borderBottom: `1px solid ${C.border}`,
+                display: 'flex', alignItems: 'baseline', gap: 12
+              }}>
+                <span style={{ fontSize: 10, color: C.textDim, fontFamily: MONO }}>Track {def.track}</span>
+                <span style={{ fontFamily: SANS, fontSize: 14, color: C.text, fontWeight: 600 }}>{def.name}</span>
+                <span style={{ fontSize: 11, color: C.textDim, fontFamily: MONO }}>[{id}]</span>
+              </div>
+              <div style={{ padding: '12px 14px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                {[['R', C.right, 'RIGHT'], ['L', C.left, 'LEFT']].map(([leg, color, label]) => {
+                  const key = `${id}_${leg}`;
+                  const prog = progression[key] || { level: 1, streak: 0 };
+                  const levelDef = def.levels[prog.level - 1];
+                  if (!levelDef) return null;
+                  const done = (todayLog[key] || {}).done || false;
+                  const canAdvance = prog.streak >= 3 && prog.level < def.levels.length;
+                  const nextLevelDef = def.levels[prog.level];
+                  return (
+                    <div key={leg} style={{
+                      flex: 1, minWidth: 220,
+                      background: C.surface3, border: `1px solid ${C.border}`, padding: '10px 12px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <div style={{ width: 8, height: 8, background: color }} />
+                        <span style={{ fontSize: 10, color, fontFamily: MONO, letterSpacing: 1 }}>{label}</span>
+                        <span style={{ fontSize: 10, color: C.textDim, fontFamily: MONO, marginLeft: 'auto' }}>
+                          Streak {prog.streak}/3
+                        </span>
+                      </div>
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, marginBottom: 3 }}>Level {prog.level} — Active</div>
+                        <div style={{ fontSize: 13, color: C.text, fontFamily: SANS, marginBottom: 2 }}>{levelDef.name}</div>
+                        <div style={{ fontSize: 11, color: C.textDim, fontFamily: MONO }}>{levelDef.sets} × {levelDef.reps}</div>
+                      </div>
+                      <button onClick={() => toggleDone(id, leg)} style={{
+                        background: done ? color + '33' : 'transparent',
+                        border: `1px solid ${done ? color : C.border2}`,
+                        color: done ? color : C.textDim,
+                        padding: '6px 14px', fontSize: 12, fontFamily: MONO,
+                        cursor: 'pointer', borderRadius: 2, width: '100%', marginBottom: 8
+                      }}>
+                        {done ? '✓ DONE TODAY' : 'MARK DONE'}
+                      </button>
+                      <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                        {[1, 2, 3].map(i => (
+                          <div key={i} style={{ flex: 1, height: 4, background: prog.streak >= i ? color : C.border2 }} />
+                        ))}
+                      </div>
+                      {nextLevelDef ? (
+                        <div style={{ opacity: canAdvance ? 1 : 0.4, borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
+                          <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, marginBottom: 3 }}>
+                            Level {prog.level + 1} — {canAdvance ? '🔓 UNLOCKED' : '🔒 Locked'}
+                          </div>
+                          <div style={{ fontSize: 12, color: C.textDim, fontFamily: SANS }}>{nextLevelDef.name}</div>
+                          {canAdvance && (
+                            <button onClick={() => advanceLevel(id, leg)} style={{
+                              background: '#1f6feb22', border: `1px solid #1f6feb`,
+                              color: '#58a6ff', padding: '4px 10px', fontSize: 11,
+                              fontFamily: MONO, cursor: 'pointer', borderRadius: 2, marginTop: 6
+                            }}>
+                              ADVANCE TO LEVEL {prog.level + 1}
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 10, color: C.hrv, fontFamily: MONO, opacity: 0.8 }}>✓ Max level reached</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ─── RUN PROTOCOL ──────────────────────────────────────────────────────
+
+    function RunProtocol({ runProtocol, setRunProtocol, checkins }) {
+      const td = today();
+      const currentWeek = runProtocol.currentWeek || 1;
+      const sessions = runProtocol.sessions || [];
+      const weekSessions = sessions.filter(s => s.week === currentWeek);
+      const completedSessions = weekSessions.filter(s => s.completed);
+      const weekDef = RUN_WEEKS[Math.min(currentWeek - 1, RUN_WEEKS.length - 1)];
+      const canAdvance = completedSessions.length >= 3 && currentWeek < 4;
+
+      const logSession = () => {
+        const ci = checkins.find(c => c.date === td);
+        const painR = ci?.painR ?? 0;
+        const painL = ci?.painL ?? 0;
+        const regressed = painR > 2 || painL > 2;
+        const sessionNum = weekSessions.length + 1;
+        const newSession = { date: td, week: currentWeek, sessionNum, painR, painL, completed: !regressed, regressed };
+        const updated = { ...runProtocol, sessions: [...sessions, newSession] };
+        setRunProtocol(updated);
+        store.set('runProtocol', updated);
+      };
+
+      const advanceWeek = () => {
+        const updated = { ...runProtocol, currentWeek: currentWeek + 1 };
+        setRunProtocol(updated);
+        store.set('runProtocol', updated);
+      };
+
+      return (
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ fontSize: 11, color: C.textDim, fontFamily: SANS }}>
+            Advance only when 3 sessions completed, pain ≤2/10 both legs. RIGHT pain >2 = regression, session not counted.
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {RUN_WEEKS.map(w => {
+              const wS = sessions.filter(s => s.week === w.week);
+              const wC = wS.filter(s => s.completed).length;
+              const isCur = w.week === currentWeek;
+              const isPast = w.week < currentWeek;
+              return (
+                <div key={w.week} style={{
+                  background: isCur ? C.surface2 : C.surface,
+                  border: `1px solid ${isCur ? C.hrv : C.border}`,
+                  padding: '14px 18px', minWidth: 155,
+                  opacity: w.week > currentWeek ? 0.45 : 1
+                }}>
+                  <div style={{ fontSize: 10, color: isCur ? C.hrv : C.textDim, fontFamily: MONO, letterSpacing: 1, marginBottom: 6 }}>
+                    WEEK {w.week} {isCur ? '◀ CURRENT' : isPast ? '✓ DONE' : ''}
+                  </div>
+                  {w.run ? (
+                    <>
+                      <div style={{ fontSize: 13, color: C.text, fontFamily: SANS, marginBottom: 2 }}>
+                        {w.run}min run / {w.walk}min walk
+                      </div>
+                      <div style={{ fontSize: 11, color: C.textDim, fontFamily: MONO }}>× {w.reps} · {w.freq}×/week</div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 12, color: C.text, fontFamily: SANS }}>{w.desc}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: 5, marginTop: 10 }}>
+                    {[1, 2, 3].map(n => {
+                      const s = wS.find(x => x.sessionNum === n);
+                      const col = s ? (s.completed ? C.hrv : C.crit) : C.border2;
+                      return (
+                        <div key={n} style={{
+                          width: 26, height: 26,
+                          background: s ? col + '33' : 'transparent',
+                          border: `1px solid ${col}`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 10, color: col, fontFamily: MONO
+                        }}>
+                          {s ? (s.regressed ? '✗' : '✓') : n}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {isCur && <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, marginTop: 5 }}>{wC}/3 completed</div>}
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: 16 }}>
+            <div style={{ fontSize: 12, color: C.hrv, fontFamily: MONO, letterSpacing: 1, marginBottom: 10 }}>WEEK {currentWeek} — ACTIVE</div>
+            {weekDef?.run ? (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 18, color: C.text, fontFamily: SANS, marginBottom: 4 }}>
+                  {weekDef.run}min run / {weekDef.walk}min walk × {weekDef.reps}
+                </div>
+                <div style={{ fontSize: 12, color: C.textDim, fontFamily: MONO }}>
+                  ~{(weekDef.run + weekDef.walk) * weekDef.reps}min total · {weekDef.freq}×/week
+                </div>
+              </div>
+            ) : weekDef && (
+              <div style={{ fontSize: 15, color: C.text, fontFamily: SANS, marginBottom: 14 }}>{weekDef.desc}</div>
+            )}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={logSession} style={{
+                background: '#1f6feb22', border: `1px solid #1f6feb`,
+                color: '#58a6ff', padding: '10px 20px', fontSize: 12,
+                fontFamily: MONO, cursor: 'pointer', borderRadius: 2
+              }}>+ LOG TODAY'S SESSION</button>
+              {canAdvance && (
+                <button onClick={advanceWeek} style={{
+                  background: C.hrv + '22', border: `1px solid ${C.hrv}`,
+                  color: C.hrv, padding: '10px 20px', fontSize: 12,
+                  fontFamily: MONO, cursor: 'pointer', borderRadius: 2
+                }}>ADVANCE TO WEEK {currentWeek + 1} →</button>
+              )}
+            </div>
+          </div>
+
+          {sessions.length > 0 && (
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: 16 }}>
+              <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>Session Log</div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: MONO }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                    {['Date', 'Wk', '#', 'R', 'L', 'Status'].map(h => (
+                      <th key={h} style={{ padding: '6px 10px', color: C.textDim, fontFamily: SANS, fontSize: 10, textAlign: 'left', textTransform: 'uppercase', letterSpacing: 1 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...sessions].reverse().map((s, i) => (
+                    <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <td style={{ padding: '6px 10px', color: C.textDim }}>{s.date}</td>
+                      <td style={{ padding: '6px 10px', color: C.text }}>W{s.week}</td>
+                      <td style={{ padding: '6px 10px', color: C.text }}>{s.sessionNum}</td>
+                      <td style={{ padding: '6px 10px', color: s.painR > 2 ? C.warn : C.right }}>{s.painR}</td>
+                      <td style={{ padding: '6px 10px', color: s.painL > 2 ? C.warn : C.left }}>{s.painL}</td>
+                      <td style={{ padding: '6px 10px', color: s.completed ? C.hrv : C.crit }}>{s.completed ? '✓ OK' : '✗ Regressed'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── HISTORY ───────────────────────────────────────────────────────────
+
+    function History({ checkins }) {
+      const [sortDir, setSortDir] = useState('desc');
+      const sorted = useMemo(() =>
+        [...checkins].sort((a, b) => sortDir === 'desc' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)),
+        [checkins, sortDir]
+      );
+      const exportCSV = () => {
+        const hdr = ['Date', 'HRV', 'Stress', 'Pain_R', 'Pain_L', 'Activity', 'Notes'];
+        const rows = sorted.map(c => [c.date, c.hrv ?? '', c.workStress ?? '', c.painR ?? '', c.painL ?? '', c.activityType ?? '', (c.notes ?? '').replace(/,/g, ';')]);
+        const csv = [hdr, ...rows].map(r => r.join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'itbs-history.csv'; a.click();
+        URL.revokeObjectURL(url);
+      };
+      return (
+        <div style={{ padding: 20 }}>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: C.textDim, fontFamily: SANS }}>{sorted.length} entries</span>
+            <Btn small onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}>
+              {sortDir === 'desc' ? '↓ Newest first' : '↑ Oldest first'}
+            </Btn>
+            <Btn small onClick={exportCSV}>Export CSV</Btn>
+          </div>
+          {sorted.length === 0 ? (
+            <div style={{ color: C.textDim, fontFamily: SANS, fontSize: 13, padding: 20 }}>
+              No check-ins yet. Start in the Check-in tab.
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: MONO }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                    {['Date', 'HRV ms', 'Stress', 'Pain R', 'Pain L', 'Activity', 'Notes'].map(h => (
+                      <th key={h} style={{ padding: '8px 10px', color: C.textDim, fontFamily: SANS, fontSize: 10, textAlign: 'left', textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sorted.map((c, i) => (
+                    <tr key={c.date} style={{ borderBottom: `1px solid ${C.border}`, background: i % 2 === 0 ? 'transparent' : '#ffffff08' }}>
+                      <td style={{ padding: '8px 10px', color: C.textDim }}>{c.date}</td>
+                      <td style={{ padding: '8px 10px', color: c.hrv >= HRV_BASELINE ? C.hrv : c.hrv >= HRV_BASELINE * 0.8 ? C.warn : c.hrv ? C.crit : C.textDim }}>{c.hrv ?? '—'}</td>
+                      <td style={{ padding: '8px 10px', color: c.workStress >= 4 ? C.crit : c.workStress >= 3 ? C.warn : C.text }}>{c.workStress ?? '—'}</td>
+                      <td style={{ padding: '8px 10px', color: c.painR > 2 ? C.warn : C.right }}>{c.painR != null ? c.painR : '—'}</td>
+                      <td style={{ padding: '8px 10px', color: c.painL > 2 ? C.warn : C.left }}>{c.painL != null ? c.painL : '—'}</td>
+                      <td style={{ padding: '8px 10px', color: C.text }}>{c.activityType ?? '—'}</td>
+                      <td style={{ padding: '8px 10px', color: C.textDim, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.notes || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── EXERCISE GUIDE ────────────────────────────────────────────────────
+
+    const GC = {
+      right: '#f97316', left: '#3b82f6', arrow: '#10b981',
+      warn: '#f59e0b', muted: '#8b949e', body: '#c8a882', bone: '#e2d5c3',
+      equipment: '#6b7280', equipmentAccent: '#f59e0b',
+      surface: '#1e2530', bg: '#0d1117', card: '#161b22', border: '#21262d', text: '#e6edf3',
+    };
+    const tagColors = { QUAD: '#8b5cf6', HAMSTRING: '#f97316', GLUTE: '#10b981', CALF: '#3b82f6' };
+
+    // SVG Illustrations
+    function SplitSquatIso() {
+      return (
+        <svg viewBox="0 0 200 140" style={{width:'100%',height:'auto',display:'block',border:`1px solid ${GC.border}`}}>
+          <rect width="200" height="140" fill={GC.bg} />
+          <line x1="10" y1="125" x2="190" y2="125" stroke={GC.border} strokeWidth="1.5" />
+          <g transform="translate(60, 10)">
+            <circle cx="40" cy="18" r="9" fill={GC.body} stroke={GC.bone} strokeWidth="1.5" />
+            <line x1="40" y1="27" x2="40" y2="60" stroke={GC.body} strokeWidth="3" strokeLinecap="round" />
+            <line x1="40" y1="36" x2="22" y2="48" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="40" y1="36" x2="58" y2="48" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="40" y1="60" x2="52" y2="82" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+            <line x1="52" y1="82" x2="52" y2="115" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+            <line x1="40" y1="60" x2="24" y2="78" stroke={GC.left} strokeWidth="3.5" strokeLinecap="round" />
+            <line x1="24" y1="78" x2="20" y2="115" stroke={GC.left} strokeWidth="3" strokeLinecap="round" />
+            <circle cx="20" cy="115" r="4" fill="none" stroke={GC.equipmentAccent} strokeWidth="1.5" strokeDasharray="2 2" />
+            <circle cx="52" cy="82" r="4" fill={GC.surface} stroke={GC.right} strokeWidth="1.5" />
+            <circle cx="24" cy="78" r="4" fill={GC.surface} stroke={GC.left} strokeWidth="1.5" />
+            <line x1="52" y1="115" x2="58" y2="115" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          </g>
+          <text x="128" y="70" fill={GC.right} fontSize="9" fontFamily="monospace">FRONT 90°</text>
+          <text x="18" y="108" fill={GC.equipmentAccent} fontSize="8" fontFamily="monospace">hover</text>
+          <rect x="128" y="88" width="55" height="16" fill="none" stroke={GC.equipmentAccent} strokeWidth="1" />
+          <text x="155" y="99" fill={GC.equipmentAccent} fontSize="8" fontFamily="monospace" textAnchor="middle">HOLD 60s</text>
+        </svg>
+      );
+    }
+    function RFESplitSquat() {
+      return (
+        <svg viewBox="0 0 200 140" style={{width:'100%',height:'auto',display:'block',border:`1px solid ${GC.border}`}}>
+          <rect width="200" height="140" fill={GC.bg} />
+          <line x1="10" y1="125" x2="190" y2="125" stroke={GC.border} strokeWidth="1.5" />
+          <rect x="12" y="100" width="35" height="25" fill={GC.surface} stroke={GC.border} strokeWidth="1.5" />
+          <rect x="12" y="97" width="35" height="6" fill={GC.equipment} />
+          <g transform="translate(55, 8)">
+            <circle cx="42" cy="18" r="9" fill={GC.body} stroke={GC.bone} strokeWidth="1.5" />
+            <line x1="42" y1="27" x2="42" y2="58" stroke={GC.body} strokeWidth="3" strokeLinecap="round" />
+            <line x1="42" y1="36" x2="24" y2="50" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="42" y1="36" x2="60" y2="50" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="42" y1="58" x2="56" y2="80" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+            <line x1="56" y1="80" x2="58" y2="117" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+            <line x1="58" y1="117" x2="65" y2="117" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="42" y1="58" x2="26" y2="72" stroke={GC.left} strokeWidth="3.5" strokeLinecap="round" />
+            <line x1="26" y1="72" x2="20" y2="92" stroke={GC.left} strokeWidth="3" strokeLinecap="round" />
+            <line x1="20" y1="92" x2="8" y2="89" stroke={GC.left} strokeWidth="2.5" strokeLinecap="round" />
+            <circle cx="56" cy="80" r="4" fill={GC.surface} stroke={GC.right} strokeWidth="1.5" />
+            <circle cx="26" cy="72" r="4" fill={GC.surface} stroke={GC.left} strokeWidth="1.5" />
+          </g>
+          <line x1="29" y1="97" x2="29" y2="125" stroke={GC.arrow} strokeWidth="1.5" strokeDasharray="3 2" />
+          <polygon points="29,94 26,99 32,99" fill={GC.arrow} />
+          <text x="35" y="113" fill={GC.arrow} fontSize="8" fontFamily="monospace">elev.</text>
+          <text x="140" y="65" fill={GC.muted} fontSize="8" fontFamily="monospace">quad+hip</text>
+        </svg>
+      );
+    }
+    function DeficitSplitSquat() {
+      return (
+        <svg viewBox="0 0 200 140" style={{width:'100%',height:'auto',display:'block',border:`1px solid ${GC.border}`}}>
+          <rect width="200" height="140" fill={GC.bg} />
+          <line x1="10" y1="128" x2="190" y2="128" stroke={GC.border} strokeWidth="1" />
+          <rect x="105" y="114" width="40" height="14" fill={GC.equipment} stroke={GC.equipmentAccent} strokeWidth="1.5" />
+          <text x="125" y="123" fill={GC.equipmentAccent} fontSize="7" fontFamily="monospace" textAnchor="middle">2–4"</text>
+          <rect x="20" y="100" width="32" height="28" fill={GC.surface} stroke={GC.border} strokeWidth="1.5" />
+          <rect x="20" y="97" width="32" height="5" fill={GC.equipment} />
+          <g transform="translate(52, 5)">
+            <circle cx="52" cy="18" r="9" fill={GC.body} stroke={GC.bone} strokeWidth="1.5" />
+            <line x1="52" y1="27" x2="52" y2="60" stroke={GC.body} strokeWidth="3" strokeLinecap="round" />
+            <line x1="52" y1="36" x2="34" y2="50" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="52" y1="36" x2="70" y2="50" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="52" y1="60" x2="68" y2="82" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+            <line x1="68" y1="82" x2="70" y2="109" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+            <line x1="70" y1="109" x2="78" y2="109" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="52" y1="60" x2="34" y2="75" stroke={GC.left} strokeWidth="3.5" strokeLinecap="round" />
+            <line x1="34" y1="75" x2="28" y2="95" stroke={GC.left} strokeWidth="3" strokeLinecap="round" />
+            <line x1="28" y1="95" x2="16" y2="92" stroke={GC.left} strokeWidth="2.5" strokeLinecap="round" />
+            <circle cx="68" cy="82" r="4" fill={GC.surface} stroke={GC.right} strokeWidth="1.5" />
+            <circle cx="34" cy="75" r="4" fill={GC.surface} stroke={GC.left} strokeWidth="1.5" />
+          </g>
+          <text x="140" y="78" fill={GC.arrow} fontSize="8" fontFamily="monospace">↑ ROM</text>
+          <text x="140" y="88" fill={GC.muted} fontSize="7" fontFamily="monospace">6–12 reps</text>
+        </svg>
+      );
+    }
+    function StepUpIllustration() {
+      return (
+        <svg viewBox="0 0 200 140" style={{width:'100%',height:'auto',display:'block',border:`1px solid ${GC.border}`}}>
+          <rect width="200" height="140" fill={GC.bg} />
+          <line x1="10" y1="128" x2="190" y2="128" stroke={GC.border} strokeWidth="1.5" />
+          <rect x="70" y="100" width="80" height="28" fill={GC.surface} stroke={GC.border} strokeWidth="1.5" />
+          <rect x="70" y="97" width="80" height="5" fill={GC.equipment} />
+          <text x="110" y="118" fill={GC.muted} fontSize="8" fontFamily="monospace" textAnchor="middle">6–7"</text>
+          <circle cx="110" cy="30" r="10" fill={GC.body} stroke={GC.bone} strokeWidth="1.5" />
+          <line x1="110" y1="40" x2="110" y2="72" stroke={GC.body} strokeWidth="3" strokeLinecap="round" />
+          <line x1="110" y1="50" x2="92" y2="64" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="110" y1="50" x2="128" y2="64" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="110" y1="72" x2="100" y2="90" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="100" y1="90" x2="98" y2="97" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="98" y1="97" x2="92" y2="97" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="110" y1="72" x2="120" y2="94" stroke={GC.left} strokeWidth="2.5" strokeLinecap="round" strokeDasharray="4 3" />
+          <line x1="120" y1="94" x2="122" y2="108" stroke={GC.left} strokeWidth="2.5" strokeLinecap="round" strokeDasharray="4 3" />
+          <circle cx="100" cy="90" r="4" fill={GC.surface} stroke={GC.right} strokeWidth="1.5" />
+          <line x1="155" y1="100" x2="155" y2="60" stroke={GC.arrow} strokeWidth="1.5" strokeDasharray="3 2" />
+          <polygon points="155,54 151,62 159,62" fill={GC.arrow} />
+          <text x="160" y="82" fill={GC.arrow} fontSize="8" fontFamily="monospace">drive</text>
+          <text x="12" y="75" fill={GC.equipmentAccent} fontSize="7" fontFamily="monospace">no trail</text>
+          <text x="12" y="84" fill={GC.equipmentAccent} fontSize="7" fontFamily="monospace">push-off</text>
+        </svg>
+      );
+    }
+    function LateralStepDown() {
+      return (
+        <svg viewBox="0 0 200 140" style={{width:'100%',height:'auto',display:'block',border:`1px solid ${GC.border}`}}>
+          <rect width="200" height="140" fill={GC.bg} />
+          <line x1="10" y1="128" x2="190" y2="128" stroke={GC.border} strokeWidth="1.5" />
+          <rect x="60" y="100" width="80" height="28" fill={GC.surface} stroke={GC.border} strokeWidth="1.5" />
+          <rect x="60" y="97" width="80" height="5" fill={GC.equipment} />
+          <circle cx="100" cy="28" r="10" fill={GC.body} stroke={GC.bone} strokeWidth="1.5" />
+          <line x1="100" y1="38" x2="100" y2="70" stroke={GC.body} strokeWidth="3" strokeLinecap="round" />
+          <line x1="100" y1="48" x2="82" y2="60" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="100" y1="48" x2="118" y2="60" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="100" y1="70" x2="90" y2="88" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="90" y1="88" x2="88" y2="97" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="88" y1="97" x2="82" y2="97" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="100" y1="70" x2="116" y2="88" stroke={GC.left} strokeWidth="3" strokeLinecap="round" strokeDasharray="4 2" />
+          <line x1="116" y1="88" x2="118" y2="108" stroke={GC.left} strokeWidth="2.5" strokeLinecap="round" strokeDasharray="4 2" />
+          <circle cx="118" cy="115" r="5" fill="none" stroke={GC.equipmentAccent} strokeWidth="1.5" strokeDasharray="2 2" />
+          <text x="126" y="119" fill={GC.equipmentAccent} fontSize="8" fontFamily="monospace">tap</text>
+          <circle cx="90" cy="88" r="4" fill={GC.surface} stroke={GC.right} strokeWidth="1.5" />
+          <line x1="155" y1="55" x2="155" y2="95" stroke={GC.arrow} strokeWidth="1.5" strokeDasharray="3 2" />
+          <polygon points="155,100 151,92 159,92" fill={GC.arrow} />
+          <text x="160" y="80" fill={GC.arrow} fontSize="7" fontFamily="monospace">slow ctrl</text>
+        </svg>
+      );
+    }
+    function BridgeIsometric() {
+      return (
+        <svg viewBox="0 0 200 140" style={{width:'100%',height:'auto',display:'block',border:`1px solid ${GC.border}`}}>
+          <rect width="200" height="140" fill={GC.bg} />
+          <rect x="10" y="118" width="180" height="12" fill={GC.surface} stroke={GC.border} strokeWidth="1" />
+          <line x1="10" y1="118" x2="190" y2="118" stroke={GC.equipment} strokeWidth="2" />
+          <circle cx="28" cy="112" r="8" fill={GC.body} stroke={GC.bone} strokeWidth="1.5" />
+          <line x1="36" y1="110" x2="80" y2="92" stroke={GC.body} strokeWidth="3" strokeLinecap="round" />
+          <circle cx="90" cy="88" r="5" fill={GC.surface} stroke={GC.equipmentAccent} strokeWidth="2" />
+          <line x1="90" y1="88" x2="112" y2="100" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="112" y1="100" x2="118" y2="118" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="118" y1="118" x2="125" y2="118" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="90" y1="88" x2="110" y2="98" stroke={GC.left} strokeWidth="3" strokeLinecap="round" />
+          <line x1="110" y1="98" x2="105" y2="118" stroke={GC.left} strokeWidth="3" strokeLinecap="round" />
+          <line x1="50" y1="100" x2="40" y2="118" stroke={GC.body} strokeWidth="2" strokeLinecap="round" />
+          <line x1="68" y1="95" x2="60" y2="118" stroke={GC.body} strokeWidth="2" strokeLinecap="round" />
+          <text x="140" y="85" fill={GC.right} fontSize="8" fontFamily="monospace">hamstring</text>
+          <text x="140" y="95" fill={GC.right} fontSize="8" fontFamily="monospace">+ glutes</text>
+          <rect x="140" y="105" width="45" height="14" fill="none" stroke={GC.equipmentAccent} strokeWidth="1" />
+          <text x="162" y="115" fill={GC.equipmentAccent} fontSize="7" fontFamily="monospace" textAnchor="middle">HOLD 30s</text>
+        </svg>
+      );
+    }
+    function SliderHamstring() {
+      return (
+        <svg viewBox="0 0 200 140" style={{width:'100%',height:'auto',display:'block',border:`1px solid ${GC.border}`}}>
+          <rect width="200" height="140" fill={GC.bg} />
+          <rect x="10" y="118" width="180" height="12" fill={GC.surface} stroke={GC.border} strokeWidth="1" />
+          <line x1="10" y1="118" x2="190" y2="118" stroke={GC.equipment} strokeWidth="2" />
+          <ellipse cx="148" cy="118" rx="12" ry="3" fill={GC.equipment} stroke={GC.equipmentAccent} strokeWidth="1.5" />
+          <ellipse cx="168" cy="118" rx="12" ry="3" fill={GC.equipment} stroke={GC.equipmentAccent} strokeWidth="1.5" />
+          <circle cx="25" cy="112" r="8" fill={GC.body} stroke={GC.bone} strokeWidth="1.5" />
+          <line x1="33" y1="110" x2="75" y2="105" stroke={GC.body} strokeWidth="3" strokeLinecap="round" />
+          <circle cx="80" cy="103" r="4" fill={GC.surface} stroke={GC.equipmentAccent} strokeWidth="2" />
+          <line x1="80" y1="103" x2="120" y2="110" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="120" y1="110" x2="158" y2="116" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="80" y1="103" x2="115" y2="108" stroke={GC.left} strokeWidth="3" strokeLinecap="round" />
+          <line x1="115" y1="108" x2="170" y2="116" stroke={GC.left} strokeWidth="3" strokeLinecap="round" />
+          <line x1="45" y1="107" x2="38" y2="118" stroke={GC.body} strokeWidth="2" strokeLinecap="round" />
+          <line x1="60" y1="106" x2="55" y2="118" stroke={GC.body} strokeWidth="2" strokeLinecap="round" />
+          <line x1="158" y1="108" x2="130" y2="108" stroke={GC.arrow} strokeWidth="1.5" strokeDasharray="3 2" />
+          <polygon points="127,108 133,105 133,111" fill={GC.arrow} />
+          <text x="128" y="100" fill={GC.arrow} fontSize="8" fontFamily="monospace">pull in</text>
+          <text x="12" y="70" fill={GC.right} fontSize="8" fontFamily="monospace">eccentric</text>
+          <text x="12" y="80" fill={GC.right} fontSize="8" fontFamily="monospace">hamstring</text>
+          <text x="12" y="90" fill={GC.muted} fontSize="7" fontFamily="monospace">hips stay up</text>
+        </svg>
+      );
+    }
+    function ShortSidePlank() {
+      return (
+        <svg viewBox="0 0 200 140" style={{width:'100%',height:'auto',display:'block',border:`1px solid ${GC.border}`}}>
+          <rect width="200" height="140" fill={GC.bg} />
+          <rect x="10" y="118" width="180" height="12" fill={GC.surface} stroke={GC.border} strokeWidth="1" />
+          <line x1="10" y1="118" x2="190" y2="118" stroke={GC.equipment} strokeWidth="2" />
+          <circle cx="155" cy="65" r="9" fill={GC.body} stroke={GC.bone} strokeWidth="1.5" />
+          <line x1="147" y1="70" x2="85" y2="105" stroke={GC.body} strokeWidth="3" strokeLinecap="round" />
+          <line x1="130" y1="82" x2="138" y2="65" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="85" y1="105" x2="68" y2="118" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <circle cx="105" cy="93" r="4" fill={GC.surface} stroke={GC.right} strokeWidth="2" />
+          <line x1="105" y1="93" x2="88" y2="108" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="88" y1="108" x2="80" y2="118" stroke={GC.right} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="105" y1="93" x2="90" y2="106" stroke={GC.left} strokeWidth="3" strokeLinecap="round" />
+          <circle cx="88" cy="108" r="4" fill={GC.surface} stroke={GC.right} strokeWidth="1.5" />
+          <line x1="155" y1="55" x2="68" y2="115" stroke={GC.equipmentAccent} strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+          <text x="12" y="50" fill={GC.right} fontSize="8" fontFamily="monospace">glute med</text>
+          <text x="12" y="62" fill={GC.muted} fontSize="7" fontFamily="monospace">20–40s hold</text>
+          <text x="12" y="76" fill={GC.equipmentAccent} fontSize="7" fontFamily="monospace">knees bent</text>
+        </svg>
+      );
+    }
+    function FullSidePlank() {
+      return (
+        <svg viewBox="0 0 200 140" style={{width:'100%',height:'auto',display:'block',border:`1px solid ${GC.border}`}}>
+          <rect width="200" height="140" fill={GC.bg} />
+          <rect x="10" y="118" width="180" height="12" fill={GC.surface} stroke={GC.border} strokeWidth="1" />
+          <line x1="10" y1="118" x2="190" y2="118" stroke={GC.equipment} strokeWidth="2" />
+          <circle cx="162" cy="55" r="9" fill={GC.body} stroke={GC.bone} strokeWidth="1.5" />
+          <line x1="153" y1="60" x2="88" y2="98" stroke={GC.body} strokeWidth="3" strokeLinecap="round" />
+          <line x1="135" y1="72" x2="145" y2="55" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="88" y1="98" x2="68" y2="118" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <circle cx="112" cy="83" r="4" fill={GC.surface} stroke={GC.right} strokeWidth="2" />
+          <line x1="112" y1="83" x2="92" y2="108" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="92" y1="108" x2="88" y2="118" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="112" y1="83" x2="95" y2="106" stroke={GC.left} strokeWidth="3" strokeLinecap="round" />
+          <line x1="162" y1="46" x2="88" y2="118" stroke={GC.equipmentAccent} strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+          <text x="12" y="50" fill={GC.right} fontSize="8" fontFamily="monospace">full plank</text>
+          <text x="12" y="62" fill={GC.muted} fontSize="7" fontFamily="monospace">legs stacked</text>
+          <text x="12" y="74" fill={GC.muted} fontSize="7" fontFamily="monospace">30–45s hold</text>
+          <text x="12" y="90" fill={GC.equipmentAccent} fontSize="7" fontFamily="monospace">no sag/pike</text>
+        </svg>
+      );
+    }
+    function CrabWalk() {
+      return (
+        <svg viewBox="0 0 200 140" style={{width:'100%',height:'auto',display:'block',border:`1px solid ${GC.border}`}}>
+          <rect width="200" height="140" fill={GC.bg} />
+          <line x1="10" y1="128" x2="190" y2="128" stroke={GC.border} strokeWidth="1.5" />
+          <path d="M 62 112 Q 100 118 138 112" fill="none" stroke={GC.equipmentAccent} strokeWidth="2.5" />
+          <text x="92" y="128" fill={GC.equipmentAccent} fontSize="8" fontFamily="monospace" textAnchor="middle">band</text>
+          <circle cx="100" cy="32" r="9" fill={GC.body} stroke={GC.bone} strokeWidth="1.5" />
+          <line x1="100" y1="41" x2="100" y2="72" stroke={GC.body} strokeWidth="3" strokeLinecap="round" />
+          <line x1="100" y1="52" x2="82" y2="66" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="100" y1="52" x2="118" y2="66" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="100" y1="72" x2="112" y2="92" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="112" y1="92" x2="116" y2="112" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="100" y1="72" x2="88" y2="92" stroke={GC.left} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="88" y1="92" x2="84" y2="112" stroke={GC.left} strokeWidth="3.5" strokeLinecap="round" />
+          <circle cx="112" cy="92" r="4" fill={GC.surface} stroke={GC.right} strokeWidth="1.5" />
+          <circle cx="88" cy="92" r="4" fill={GC.surface} stroke={GC.left} strokeWidth="1.5" />
+          <line x1="155" y1="80" x2="175" y2="80" stroke={GC.arrow} strokeWidth="2" />
+          <polygon points="175,80 169,76 169,84" fill={GC.arrow} />
+          <text x="12" y="55" fill={GC.right} fontSize="8" fontFamily="monospace">glute med</text>
+          <text x="12" y="67" fill={GC.muted} fontSize="7" fontFamily="monospace">feet parallel</text>
+        </svg>
+      );
+    }
+    function HeelRaise() {
+      return (
+        <svg viewBox="0 0 200 140" style={{width:'100%',height:'auto',display:'block',border:`1px solid ${GC.border}`}}>
+          <rect width="200" height="140" fill={GC.bg} />
+          <rect x="60" y="110" width="80" height="20" fill={GC.surface} stroke={GC.border} strokeWidth="1.5" />
+          <rect x="60" y="107" width="80" height="5" fill={GC.equipment} />
+          <line x1="10" y1="130" x2="190" y2="130" stroke={GC.border} strokeWidth="1" />
+          <line x1="28" y1="20" x2="28" y2="130" stroke={GC.border} strokeWidth="2" />
+          <circle cx="100" cy="24" r="10" fill={GC.body} stroke={GC.bone} strokeWidth="1.5" />
+          <line x1="100" y1="34" x2="100" y2="68" stroke={GC.body} strokeWidth="3" strokeLinecap="round" />
+          <line x1="100" y1="46" x2="62" y2="58" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="62" y1="58" x2="38" y2="62" stroke={GC.body} strokeWidth="2" strokeLinecap="round" />
+          <line x1="100" y1="46" x2="118" y2="58" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="100" y1="68" x2="90" y2="90" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="90" y1="90" x2="88" y2="107" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="88" y1="107" x2="96" y2="104" stroke={GC.right} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="100" y1="68" x2="110" y2="90" stroke={GC.left} strokeWidth="3" strokeLinecap="round" />
+          <line x1="110" y1="90" x2="112" y2="107" stroke={GC.left} strokeWidth="3" strokeLinecap="round" />
+          <line x1="112" y1="107" x2="120" y2="104" stroke={GC.left} strokeWidth="2.5" strokeLinecap="round" />
+          <circle cx="90" cy="90" r="4" fill={GC.surface} stroke={GC.right} strokeWidth="1.5" />
+          <circle cx="110" cy="90" r="4" fill={GC.surface} stroke={GC.left} strokeWidth="1.5" />
+          <line x1="152" y1="104" x2="152" y2="70" stroke={GC.arrow} strokeWidth="1.5" strokeDasharray="3 2" />
+          <polygon points="152,64 148,72 156,72" fill={GC.arrow} />
+          <text x="12" y="68" fill={GC.right} fontSize="8" fontFamily="monospace">gastroc</text>
+          <text x="12" y="78" fill={GC.muted} fontSize="7" fontFamily="monospace">3–5s eccentric</text>
+        </svg>
+      );
+    }
+    function NordicCurl() {
+      return (
+        <svg viewBox="0 0 200 140" style={{width:'100%',height:'auto',display:'block',border:`1px solid ${GC.border}`}}>
+          <rect width="200" height="140" fill={GC.bg} />
+          <rect x="10" y="118" width="180" height="12" fill={GC.surface} stroke={GC.border} strokeWidth="1" />
+          <line x1="10" y1="118" x2="190" y2="118" stroke={GC.equipment} strokeWidth="2" />
+          <rect x="130" y="110" width="50" height="8" fill={GC.equipment} stroke={GC.equipmentAccent} strokeWidth="1.5" />
+          <text x="155" y="134" fill={GC.equipmentAccent} fontSize="7" fontFamily="monospace" textAnchor="middle">anchored</text>
+          <circle cx="90" cy="30" r="9" fill={GC.body} stroke={GC.bone} strokeWidth="1.5" />
+          <line x1="90" y1="39" x2="110" y2="72" stroke={GC.body} strokeWidth="3" strokeLinecap="round" />
+          <line x1="96" y1="52" x2="72" y2="40" stroke={GC.body} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="72" y1="40" x2="55" y2="38" stroke={GC.body} strokeWidth="2" strokeLinecap="round" />
+          <line x1="110" y1="72" x2="128" y2="100" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="110" y1="72" x2="125" y2="98" stroke={GC.left} strokeWidth="3" strokeLinecap="round" />
+          <line x1="128" y1="100" x2="148" y2="118" stroke={GC.right} strokeWidth="3.5" strokeLinecap="round" />
+          <line x1="125" y1="98" x2="144" y2="118" stroke={GC.left} strokeWidth="3" strokeLinecap="round" />
+          <circle cx="128" cy="100" r="5" fill={GC.surface} stroke={GC.right} strokeWidth="2" />
+          <path d="M 90 39 A 55 55 0 0 1 130 55" fill="none" stroke={GC.arrow} strokeWidth="1.5" strokeDasharray="4 3" />
+          <polygon points="130,55 122,52 128,60" fill={GC.arrow} />
+          <text x="12" y="52" fill={GC.right} fontSize="8" fontFamily="monospace">hamstring</text>
+          <text x="12" y="62" fill={GC.right} fontSize="8" fontFamily="monospace">eccentric</text>
+          <text x="12" y="76" fill={GC.muted} fontSize="7" fontFamily="monospace">lower slowly</text>
+        </svg>
+      );
+    }
+
+    const GUIDE_TRACKS = [
+      { id:'1A', name:'Split Squat Series', target:'Quadriceps · VMO', tag:'QUAD', freq:'2×/week, non-run days',
+        exercises:[
+          { level:1, name:'Split Squat Isometric', sets:'3 × 60s hold', target:'Quadriceps, VMO', illustration:<SplitSquatIso />,
+            cues:['Lower straight down — back knee hovers just above floor','Hold position completely still for the full 60s','Torso upright, no forward lean','Pain ≤2/10 during hold; back to baseline within 24h'], legNote:null },
+          { level:2, name:'Rear Foot Elevated Split Squat Iso', sets:'3 × 60s hold', target:'Quadriceps, hip flexors', illustration:<RFESplitSquat />,
+            cues:['Back foot elevated on bench/chair — moderate height','Not so high it shifts all load to the front hip','Maintain static hold; don\'t let torso drift forward','Challenges hip flexor of elevated leg simultaneously'], legNote:null },
+          { level:3, name:'Deficit Rear Foot Elevated Split Squat', sets:'3–4 × 6–12 slow reps', target:'Quadriceps, glutes, hip flexors', illustration:<DeficitSplitSquat />,
+            cues:['Front foot elevated 2" to start; increase over weeks','Slow eccentric (3s down), controlled concentric','Add load (dumbbell/backpack) when 12 reps is easy','The deficit increases quad range of motion significantly'], legNote:'Track R/L separately — right leg may need lower deficit height' },
+        ]},
+      { id:'1B', name:'Step Up / Step Down Series', target:'Quadriceps · Knee Stability', tag:'QUAD', freq:'2×/week, non-run days',
+        exercises:[
+          { level:1, name:'Step Up', sets:'3 × 20 reps/leg', target:'Quadriceps, VMO', illustration:<StepUpIllustration />,
+            cues:['6–7" step height to start','ALL drive through the working leg — trailing foot is passive','Trail foot taps up and down as a balance cue only','No push off from the back foot — this defeats the purpose'], legNote:'Right leg: complete set first. Left can follow same reps.' },
+          { level:2, name:'Lateral Step Down', sets:'3 × 20 reps/leg', target:'Quadriceps, knee stability', illustration:<LateralStepDown />,
+            cues:['Stand on step laterally; slowly lower free leg toward ground','Controlled descent over 3–4 seconds','Free foot gently taps floor — does not bear weight','Stance knee must track over second toe, no cave inward'], legNote:'Right knee may fatigue faster — shorter sets acceptable.' },
+        ]},
+      { id:'2A', name:'Hamstring Slider Series', target:'Hamstrings · Eccentric', tag:'HAMSTRING', freq:'2×/week, non-run days',
+        exercises:[
+          { level:1, name:'Feet-Elevated Bridge Isometric', sets:'3 × 30s hold', target:'Hamstrings, glutes', illustration:<BridgeIsometric />,
+            cues:['Heels on a chair/bench, knees at ~30° flexion','Drive hips up until body is straight from knee to shoulder','Glutes FULLY contracted throughout — don\'t let hips sag','This is the entry point: do not rush past it'], legNote:null },
+          { level:2, name:'Double Leg Eccentric Slider', sets:'3 × 12 reps', target:'Hamstrings eccentric', illustration:<SliderHamstring />,
+            cues:['Use furniture sliders, socks on hardwood, or slider disc','Start with hips bridged, then slowly slide feet out','Eccentric only: use hands to help return to start','Hips must not sag at any point during the slide out'], legNote:null },
+        ]},
+      { id:'2B', name:'Nordic Hamstring Curl', target:'Hamstrings · Eccentric', tag:'HAMSTRING', freq:'Alternative or addition to 2A',
+        exercises:[
+          { level:1, name:'Nordic Hamstring Curl', sets:'3–4 × 4–8 reps', target:'Hamstrings (heavy eccentric)', illustration:<NordicCurl />,
+            cues:['Anchor feet under a sofa/barbell or have partner hold','Lower your body forward under hamstring control only','When you can no longer control descent, catch with hands','Use hands to push back to start; eccentric only until stronger'], legNote:null },
+        ]},
+      { id:'3A', name:'Side Plank Series', target:'Glute Med · Hip Stabilizers', tag:'GLUTE', freq:'2×/week, non-run days',
+        exercises:[
+          { level:1, name:'Short Side Plank', sets:'3 × 20–40s hold', target:'Glute med, obliques', illustration:<ShortSidePlank />,
+            cues:['Knees bent, forearm on floor — lower barrier to entry','Maintain straight line from head to knee','Hips must not sag toward floor or pike upward','Breathe normally throughout — no breath-holding'], legNote:'Perform on both sides. Note any R vs L difficulty difference.' },
+          { level:2, name:'Full Side Plank', sets:'3 × 30–45s hold', target:'Glute med, obliques, hip stabilizers', illustration:<FullSidePlank />,
+            cues:['Legs straight and stacked — significantly harder than bent-knee','Perfect straight line from head to heel required','Free arm on hip or extended overhead for extra challenge','If hips start dropping, regress to short side plank'], legNote:'Right side will likely fatigue faster given primary ITBS on right.' },
+        ]},
+      { id:'3B', name:'Band Series', target:'Glute Med · Hip Abductors', tag:'GLUTE', freq:'2×/week, non-run days',
+        exercises:[
+          { level:1, name:'Crab Walk — Band Above Knees', sets:'3 × 12–15 steps each direction', target:'Glute med, hip abductors', illustration:<CrabWalk />,
+            cues:['Light resistance band just above the knees','Slight hip and knee flexion — athletic squat stance','Feet parallel (not turned out); step laterally','Lead with the knees outward — resist band caving knees in'], legNote:null },
+        ]},
+      { id:'4A', name:'Calf Raises (Straight Knee)', target:'Gastrocnemius', tag:'CALF', freq:'2×/week, non-run days',
+        exercises:[
+          { level:1, name:'Single Leg Heel Raise on Step', sets:'3–4 × 6–12 reps/leg', target:'Gastrocnemius, soleus', illustration:<HeelRaise />,
+            cues:['Rise as high as possible onto the ball of the foot','Lower SLOWLY — 3–5 second eccentric every rep','Deficit: allow heel to drop below step level at the bottom','Add load (backpack/dumbbell) when 12 reps is no longer challenging'], legNote:'Start double-leg if single-leg is too painful on right.' },
+        ]},
+    ];
+
+    function ExerciseGuide() {
+      const [activeTrack, setActiveTrack] = useState('1A');
+      const [activeLevel, setActiveLevel] = useState(0);
+      const [showCues, setShowCues] = useState(true);
+      const track = GUIDE_TRACKS.find(t => t.id === activeTrack);
+      const exercise = track && track.exercises[activeLevel];
+      const tagColor = tagColors[track?.tag] || GC.right;
+
+      return (
+        <div style={{ display:'flex', height:'calc(100vh - 110px)', overflow:'hidden' }}>
+          {/* Sidebar */}
+          <div style={{ width:180, minWidth:180, borderRight:`1px solid ${GC.border}`, overflowY:'auto', paddingTop:8 }}>
+            <div style={{ padding:'0 12px 8px', fontFamily:MONO, fontSize:10, color:GC.muted, letterSpacing:'0.12em' }}>TRACKS</div>
+            {GUIDE_TRACKS.map(t => (
+              <button key={t.id} onClick={() => { setActiveTrack(t.id); setActiveLevel(0); }} style={{
+                display:'block', width:'100%', textAlign:'left', padding:'9px 12px',
+                background: activeTrack === t.id ? C.surface2 : 'transparent',
+                border:'none', borderLeft: activeTrack === t.id ? `3px solid ${tagColors[t.tag]}` : '3px solid transparent',
+                borderBottom:`1px solid ${GC.border}`, cursor:'pointer',
+              }}>
+                <div style={{ fontFamily:MONO, fontSize:10, color:tagColors[t.tag], marginBottom:2 }}>{t.id} · {t.tag}</div>
+                <div style={{ fontSize:11, color: activeTrack === t.id ? C.text : C.textDim, fontWeight: activeTrack === t.id ? 600 : 400 }}>{t.name}</div>
+              </button>
+            ))}
+          </div>
+
+          {/* Main */}
+          <div style={{ flex:1, overflowY:'auto', padding:'16px 20px' }}>
+            {track && exercise && (<>
+              {/* Track header */}
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:14, paddingBottom:14, borderBottom:`1px solid ${GC.border}` }}>
+                <div>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:3 }}>
+                    <span style={{ fontFamily:MONO, fontSize:10, color:tagColor, background:`${tagColor}18`, border:`1px solid ${tagColor}40`, padding:'2px 8px' }}>{track.tag}</span>
+                    <span style={{ fontFamily:MONO, fontSize:10, color:C.textDim }}>TRACK {track.id}</span>
+                  </div>
+                  <div style={{ fontSize:18, fontWeight:600, letterSpacing:'-0.02em' }}>{track.name}</div>
+                  <div style={{ fontSize:12, color:C.textDim, fontFamily:MONO, marginTop:2 }}>{track.target}</div>
+                </div>
+                <div style={{ fontFamily:MONO, fontSize:10, color:C.textDim, background:C.surface, border:`1px solid ${GC.border}`, padding:'5px 10px' }}>{track.freq}</div>
+              </div>
+
+              {/* Level tabs */}
+              <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+                {track.exercises.map((ex, i) => (
+                  <button key={i} onClick={() => setActiveLevel(i)} style={{
+                    padding:'6px 14px', background: activeLevel === i ? tagColor : C.surface,
+                    color: activeLevel === i ? '#000' : C.textDim,
+                    border:`1px solid ${activeLevel === i ? tagColor : GC.border}`,
+                    cursor:'pointer', fontFamily:MONO, fontSize:11, fontWeight: activeLevel === i ? 600 : 400, borderRadius:2
+                  }}>L{ex.level}</button>
+                ))}
+              </div>
+
+              {/* 2-col grid */}
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:14 }}>
+                {/* Illustration */}
+                <div>
+                  <div style={{ fontFamily:MONO, fontSize:9, color:C.textDim, letterSpacing:'0.12em', marginBottom:5 }}>ILLUSTRATION</div>
+                  {exercise.illustration}
+                  <div style={{ display:'flex', gap:14, marginTop:6, padding:'6px 10px', background:C.surface, border:`1px solid ${GC.border}` }}>
+                    {[['RIGHT', GC.right], ['LEFT', GC.left], ['MOVEMENT', GC.arrow]].map(([l, clr]) => (
+                      <div key={l} style={{ display:'flex', alignItems:'center', gap:5 }}>
+                        <div style={{ width:12, height:3, background:clr }} />
+                        <span style={{ fontFamily:MONO, fontSize:9, color:C.textDim }}>{l}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Details */}
+                <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                  <div style={{ fontFamily:MONO, fontSize:9, color:C.textDim, letterSpacing:'0.12em' }}>EXERCISE DETAILS</div>
+                  <div style={{ background:C.surface, border:`1px solid ${GC.border}`, padding:14 }}>
+                    <div style={{ fontFamily:MONO, fontSize:10, color:tagColor, marginBottom:3 }}>LEVEL {exercise.level}</div>
+                    <div style={{ fontSize:15, fontWeight:600, marginBottom:8 }}>{exercise.name}</div>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                      <div>
+                        <div style={{ fontFamily:MONO, fontSize:9, color:C.textDim, marginBottom:2 }}>PRESCRIPTION</div>
+                        <div style={{ fontFamily:MONO, fontSize:11, color:GC.equipmentAccent }}>{exercise.sets}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontFamily:MONO, fontSize:9, color:C.textDim, marginBottom:2 }}>TARGET</div>
+                        <div style={{ fontFamily:MONO, fontSize:11, color:C.text }}>{exercise.target}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ background:`${GC.equipmentAccent}10`, border:`1px solid ${GC.equipmentAccent}40`, padding:'7px 12px', display:'flex', alignItems:'center', gap:8 }}>
+                    <span>⚠</span>
+                    <span style={{ fontFamily:MONO, fontSize:10, color:GC.equipmentAccent }}>Pain ≤2/10 during. Baseline within 24h.</span>
+                  </div>
+
+                  {exercise.legNote && (
+                    <div style={{ background:`${GC.right}10`, border:`1px solid ${GC.right}30`, padding:'7px 12px' }}>
+                      <div style={{ fontFamily:MONO, fontSize:9, color:GC.right, marginBottom:3, letterSpacing:'0.1em' }}>BILATERAL NOTE</div>
+                      <div style={{ fontSize:12, color:C.text, lineHeight:1.5 }}>{exercise.legNote}</div>
+                    </div>
+                  )}
+
+                  <div style={{ background:C.surface, border:`1px solid ${GC.border}`, padding:'7px 12px' }}>
+                    <div style={{ fontFamily:MONO, fontSize:9, color:C.textDim, marginBottom:3 }}>PROGRESSION</div>
+                    <div style={{ fontSize:11, color:C.textDim, lineHeight:1.5 }}>3 consecutive sessions → advance level. R and L progress independently.</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Coaching cues */}
+              <div style={{ background:C.surface, border:`1px solid ${GC.border}`, padding:14 }}>
+                <button onClick={() => setShowCues(s => !s)} style={{ background:'none', border:'none', cursor:'pointer', display:'flex', alignItems:'center', gap:8, padding:0, marginBottom: showCues ? 10 : 0 }}>
+                  <span style={{ fontFamily:MONO, fontSize:10, color:C.textDim, letterSpacing:'0.12em' }}>COACHING CUES</span>
+                  <span style={{ fontFamily:MONO, fontSize:10, color:C.textDim, display:'inline-block', transform: showCues ? 'rotate(90deg)' : 'rotate(0)', transition:'transform 0.15s' }}>▶</span>
+                </button>
+                {showCues && exercise.cues.map((cue, i) => (
+                  <div key={i} style={{ borderLeft:`2px solid ${GC.border}`, paddingLeft:10, marginBottom: i < exercise.cues.length-1 ? 8 : 0 }}>
+                    <div style={{ display:'flex', gap:10 }}>
+                      <span style={{ fontFamily:MONO, fontSize:10, color:C.textDim, minWidth:18 }}>0{i+1}</span>
+                      <span style={{ fontSize:13, color:C.text, lineHeight:1.5 }}>{cue}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Prev/next */}
+              <div style={{ display:'flex', justifyContent:'space-between', marginTop:14, paddingTop:14, borderTop:`1px solid ${GC.border}` }}>
+                <button onClick={() => setActiveLevel(l => Math.max(0, l-1))} disabled={activeLevel===0} style={{ padding:'7px 14px', background:'none', border:`1px solid ${activeLevel===0 ? GC.border : C.textDim}`, color: activeLevel===0 ? GC.border : C.text, cursor: activeLevel===0 ? 'default' : 'pointer', fontFamily:MONO, fontSize:11, borderRadius:2 }}>← PREV</button>
+                <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                  {track.exercises.map((_, i) => <div key={i} style={{ width:6, height:6, background: i===activeLevel ? tagColor : GC.border }} />)}
+                </div>
+                <button onClick={() => setActiveLevel(l => Math.min(track.exercises.length-1, l+1))} disabled={activeLevel===track.exercises.length-1} style={{ padding:'7px 14px', background:'none', border:`1px solid ${activeLevel===track.exercises.length-1 ? GC.border : tagColor}`, color: activeLevel===track.exercises.length-1 ? GC.border : tagColor, cursor: activeLevel===track.exercises.length-1 ? 'default' : 'pointer', fontFamily:MONO, fontSize:11, borderRadius:2 }}>NEXT →</button>
+              </div>
+            </>)}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── APP ───────────────────────────────────────────────────────────────
+
+    function App() {
+      const [activeTab, setActiveTab] = useState('dashboard');
+      const [checkins, setCheckins] = useState(() => store.get('checkins') || []);
+      const [exerciseLog, setExerciseLog] = useState(() => store.get('exerciseLog') || []);
+      const [progression, setProgression] = useState(() => store.get('progression') || {});
+      const [runProtocol, setRunProtocol] = useState(() => store.get('runProtocol') || { currentWeek: 1, sessions: [] });
+      const [hrvSheet, setHrvSheet] = useState(() => store.get('hrvData') || []);
+      const [syncState, setSyncState] = useState({ loading: false, lastSync: store.get('lastSync'), error: null });
+      const [storageErr, setStorageErr] = useState(null);
+
+      useEffect(() => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap';
+        document.head.appendChild(link);
+        const ok = store.set('_ping', 1);
+        if (!ok) setStorageErr('Storage unavailable — data will not persist between sessions');
+      }, []);
+
+      const doSync = useCallback(async () => {
+        setSyncState(s => ({ ...s, loading: true, error: null }));
+        try {
+          const data = await syncHRV();
+          const lastSync = new Date().toISOString();
+          setHrvSheet(data);
+          store.set('hrvData', data);
+          store.set('lastSync', lastSync);
+          setSyncState({ loading: false, lastSync, error: null });
+        } catch (e) {
+          setSyncState(s => ({ ...s, loading: false, error: e.message }));
+        }
+      }, []);
+
+      useEffect(() => { doSync(); }, []);
+
+      const recov = useMemo(() => recoveryStatus(checkins, hrvSheet), [checkins, hrvSheet]);
+      const tabs = [
+        { id: 'dashboard', label: 'Dashboard' },
+        { id: 'checkin', label: 'Check-in' },
+        { id: 'exercises', label: 'Exercises' },
+        { id: 'runprotocol', label: 'Run Protocol' },
+        { id: 'history', label: 'History' },
+        { id: 'guide', label: 'Exercise Guide' },
+      ];
+
+      return (
+        <div style={{ background: C.bg, color: C.text, minHeight: '100vh', fontFamily: SANS, fontSize: 14 }}>
+          <style>{`
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            ::-webkit-scrollbar { width: 6px; height: 6px; }
+            ::-webkit-scrollbar-track { background: ${C.bg}; }
+            ::-webkit-scrollbar-thumb { background: ${C.border2}; border-radius: 3px; }
+            input[type=range] { cursor: pointer; height: 4px; }
+            button { transition: opacity 0.1s; }
+          `}</style>
+
+          {/* Header */}
+          <div style={{
+            background: C.surface, borderBottom: `1px solid ${C.border}`,
+            padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap'
+          }}>
+            <div style={{ fontFamily: MONO, fontSize: 13, color: C.text, letterSpacing: 2 }}>ITBS REHAB</div>
+            <div style={{ width: 1, height: 20, background: C.border }} />
+            <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS }}>Bilateral · E3 Protocol · Diagnofisic Milano · April 11, 2026</div>
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span style={{ fontSize: 16 }}>{recov.emoji}</span>
+                <span style={{ fontSize: 10, color: recov.color, fontFamily: MONO, letterSpacing: 1 }}>{recov.label}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {syncState.error && <span style={{ fontSize: 10, color: C.warn, fontFamily: MONO }}>⚠ Sync failed</span>}
+                {!syncState.error && syncState.lastSync && (
+                  <span style={{ fontSize: 10, color: C.textDim, fontFamily: MONO }}>Synced {fmtTime(syncState.lastSync)}</span>
+                )}
+                <button onClick={doSync} disabled={syncState.loading} style={{
+                  background: 'transparent', border: `1px solid ${C.border}`,
+                  color: C.textDim, padding: '4px 10px', fontSize: 10, fontFamily: MONO,
+                  cursor: 'pointer', borderRadius: 2
+                }}>{syncState.loading ? 'SYNCING…' : '⟳ SYNC HRV'}</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Banners */}
+          {syncState.error && (
+            <div style={{ background: '#f59e0b12', borderBottom: `1px solid ${C.warn}`, padding: '8px 20px', fontSize: 11, color: C.warn, fontFamily: MONO }}>
+              △ HRV sync failed ({syncState.error}) — enter HRV manually in Check-in
+            </div>
+          )}
+          {storageErr && (
+            <div style={{ background: '#ef444412', borderBottom: `1px solid ${C.crit}`, padding: '8px 20px', fontSize: 11, color: C.crit, fontFamily: MONO }}>
+              ⚠ {storageErr}
+            </div>
+          )}
+
+          {/* Tab nav */}
+          <div style={{ borderBottom: `1px solid ${C.border}`, display: 'flex', overflowX: 'auto' }}>
+            {tabs.map(t => (
+              <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
+                background: 'transparent',
+                borderBottom: `2px solid ${activeTab === t.id ? '#58a6ff' : 'transparent'}`,
+                borderTop: 'none', borderLeft: 'none', borderRight: 'none',
+                color: activeTab === t.id ? C.text : C.textDim,
+                padding: '10px 18px', fontSize: 12, fontFamily: SANS,
+                fontWeight: activeTab === t.id ? 600 : 400,
+                cursor: 'pointer', whiteSpace: 'nowrap'
+              }}>{t.label}</button>
+            ))}
+          </div>
+
+          {/* Content */}
+          {activeTab === 'dashboard' && <Dashboard checkins={checkins} hrvSheet={hrvSheet} />}
+          {activeTab === 'checkin' && <CheckIn checkins={checkins} setCheckins={setCheckins} hrvSheet={hrvSheet} />}
+          {activeTab === 'exercises' && <Exercises exerciseLog={exerciseLog} setExerciseLog={setExerciseLog} progression={progression} setProgression={setProgression} />}
+          {activeTab === 'runprotocol' && <RunProtocol runProtocol={runProtocol} setRunProtocol={setRunProtocol} checkins={checkins} />}
+          {activeTab === 'history' && <History checkins={checkins} />}
+          {activeTab === 'guide' && <ExerciseGuide />}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
