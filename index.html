@@ -502,7 +502,7 @@
             <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>
               HRV 30-Day + Stress &amp; Sleep Overlay
             </div>
-            <ResponsiveContainer width="100%" height={170}>
+            <ResponsiveContainer width="100%" height={340}>
               <ComposedChart data={chartData} margin={{ left: 0, right: 30, top: 5, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 9, fill: C.textDim, fontFamily: MONO }} interval={4} />
@@ -531,7 +531,7 @@
             <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>
               Pain Trend 14 Days — <span style={{ color: C.right }}>R Right</span> / <span style={{ color: C.left }}>L Left</span>
             </div>
-            <ResponsiveContainer width="100%" height={150}>
+            <ResponsiveContainer width="100%" height={300}>
               <ComposedChart data={painData} margin={{ left: 0, right: 10, top: 5, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 9, fill: C.textDim, fontFamily: MONO }} interval={1} />
@@ -549,7 +549,7 @@
             <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>
               Weekly Load (Last 7 Days)
             </div>
-            <ResponsiveContainer width="100%" height={110}>
+            <ResponsiveContainer width="100%" height={220}>
               <BarChart data={weekLoad} margin={{ left: 0, right: 10, top: 5, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
                 <XAxis dataKey="type" tick={{ fontSize: 11, fill: C.textDim, fontFamily: SANS }} />
