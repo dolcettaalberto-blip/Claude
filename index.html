@@ -167,7 +167,7 @@
     const GARMIN_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQRo0q5gSheb-e2_Jo-s7y6uIf8mcZcEzyjET61oGfDJ_2bybXh0o8FDErqNrysEMCM3fYu2KfGHyzD/pub?gid=1605637632&single=true&output=csv';
 
     async function syncGarmin() {
-      const resp = await fetch(GARMIN_URL);
+      const resp = await fetch(GARMIN_URL, { credentials: 'omit' });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const csv = await resp.text();
       const lines = csv.trim().split('\n');
