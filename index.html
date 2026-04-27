@@ -162,60 +162,38 @@
     const fmtShort = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
     const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—';
 
-    // ─── HRV SYNC ──────────────────────────────────────────────────────────
+    // ─── GARMIN SYNC (HRV + Sleep) ─────────────────────────────────────────
 
-    async function syncHRV() {
-      const url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQRo0q5gSheb-e2_Jo-s7y6uIf8mcZcEzyjET61oGfDJ_2bybXh0o8FDErqNrysEMCM3fYu2KfGHyzD/pub?gid=1605637632&single=true&output=csv';
-      const resp = await fetch(url);
+    const GARMIN_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQRo0q5gSheb-e2_Jo-s7y6uIf8mcZcEzyjET61oGfDJ_2bybXh0o8FDErqNrysEMCM3fYu2KfGHyzD/pub?gid=1605637632&single=true&output=csv';
+
+    async function syncGarmin() {
+      const resp = await fetch(GARMIN_URL);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const csv = await resp.text();
       const lines = csv.trim().split('\n');
       if (lines.length < 2) throw new Error('Empty sheet');
       const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
-      const idIdx = headers.indexOf('id');
-      const hrvIdx = headers.indexOf('hrv');
-      if (idIdx < 0 || hrvIdx < 0) throw new Error(`Columns missing`);
-      const data = [];
-      for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(',');
-        const date = (cols[idIdx] || '').replace(/"/g, '').trim();
-        const hrv = parseFloat((cols[hrvIdx] || '').replace(/"/g, '').trim());
-        if (/^\d{4}-\d{2}-\d{2}$/.test(date) && hrv > 0 && !isNaN(hrv)) {
-          data.push({ date, hrv: Math.round(hrv) });
-        }
-      }
-      return data;
-    }
-
-    // ─── SLEEP SYNC ────────────────────────────────────────────────────────
-
-    const SLEEP_SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQRo0q5gSheb-e2_Jo-s7y6uIf8mcZcEzyjET61oGfDJ_2bybXh0o8FDErqNrysEMCM3fYu2KfGHyzD/pub?output=csv';
-
-    async function syncSleep() {
-      const resp = await fetch(SLEEP_SHEET_URL);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const csv = await resp.text();
-      const lines = csv.trim().split('\n');
-      if (lines.length < 2) throw new Error('Empty sheet');
-      const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
-      const idIdx = headers.indexOf('id');
-      const secsIdx = headers.indexOf('sleepsecs');
+      const idIdx    = headers.indexOf('id');
+      const hrvIdx   = headers.indexOf('hrv');
+      const secsIdx  = headers.indexOf('sleepsecs');
       const scoreIdx = headers.indexOf('sleepscore');
       if (idIdx < 0) throw new Error('id column missing');
-      const data = [];
+      const hrvData = [], sleepData = [];
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(',');
         const date = (cols[idIdx] || '').replace(/"/g, '').trim();
-        const secs = parseFloat((cols[secsIdx] || '').replace(/"/g, '').trim());
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+        const hrv   = parseFloat((cols[hrvIdx]   || '').replace(/"/g, '').trim());
+        const secs  = parseFloat((cols[secsIdx]  || '').replace(/"/g, '').trim());
         const score = parseFloat((cols[scoreIdx] || '').replace(/"/g, '').trim());
-        if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-          const entry = { date };
-          if (secsIdx >= 0 && secs > 0 && !isNaN(secs)) entry.sleepHours = Math.round(secs / 360) / 10;
-          if (scoreIdx >= 0 && score > 0 && !isNaN(score)) entry.sleepScore = Math.round(score);
-          if (entry.sleepHours || entry.sleepScore) data.push(entry);
+        if (hrvIdx  >= 0 && hrv  > 0 && !isNaN(hrv))  hrvData.push({ date, hrv: Math.round(hrv) });
+        if (secs > 0 && !isNaN(secs)) {
+          const entry = { date, sleepHours: Math.round(secs / 360) / 10 };
+          if (score > 0 && !isNaN(score)) entry.sleepScore = Math.round(score);
+          sleepData.push(entry);
         }
       }
-      return data;
+      return { hrvData, sleepData };
     }
 
     // ─── CLOUD SYNC ────────────────────────────────────────────────────────
@@ -1833,7 +1811,7 @@ function getOrCreate() {
       const doSync = useCallback(async () => {
         setSyncState(s => ({ ...s, loading: true, error: null }));
         try {
-          const [hrvData, sleepData] = await Promise.all([syncHRV(), syncSleep()]);
+          const { hrvData, sleepData } = await syncGarmin();
           const lastSync = new Date().toISOString();
           setHrvSheet(hrvData);
           store.set('hrvData', hrvData);
