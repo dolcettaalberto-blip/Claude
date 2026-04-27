@@ -6,9 +6,9 @@
   <title>ITBS Rehab Tracker</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0d1117; color: #e6edf3; }
+    body { background: #edf3fb; color: #0f172a; }
     #root { min-height: 100vh; }
-    #loader { display: flex; align-items: center; justify-content: center; height: 100vh; font-family: monospace; color: #6b7280; letter-spacing: 2px; }
+    #loader { display: flex; align-items: center; justify-content: center; height: 100vh; font-family: monospace; color: #64748b; letter-spacing: 2px; }
   </style>
 </head>
 <body>
@@ -45,15 +45,15 @@
     const SP = 'itbs:';
 
     const C = {
-      bg: '#0d1117', surface: '#161b22', surface2: '#1c2128', surface3: '#21262d',
-      border: '#21262d', border2: '#30363d',
-      right: '#f97316', left: '#3b82f6',
-      hrv: '#10b981', warn: '#f59e0b', crit: '#ef4444', muted: '#6b7280',
-      text: '#e6edf3', textDim: '#8b949e',
+      bg: '#edf3fb', surface: '#ffffff', surface2: '#edf3fb', surface3: '#ddeaf7',
+      border: '#ccddf2', border2: '#aac5e6',
+      right: '#ea580c', left: '#2563eb',
+      hrv: '#059669', warn: '#d97706', crit: '#dc2626', muted: '#94a3b8',
+      text: '#0f172a', textDim: '#475569',
     };
 
     const MONO = "'IBM Plex Mono', 'Courier New', monospace";
-    const SANS = "'IBM Plex Sans', system-ui, sans-serif";
+    const SANS = "'Montserrat', system-ui, sans-serif";
 
     const EX = {
       '1A': {
@@ -187,20 +187,96 @@
       return data;
     }
 
+    // ─── CLOUD SYNC ────────────────────────────────────────────────────────
+
+    function mergeCheckins(a, b) {
+      const m = {};
+      for (const ci of [...(a || []), ...(b || [])]) {
+        const key = ci.id || ci.date;
+        if (!m[key] || (ci._savedAt || 0) >= (m[key]._savedAt || 0)) m[key] = ci;
+      }
+      return Object.values(m).sort((x, y) => {
+        const dc = x.date.localeCompare(y.date);
+        return dc !== 0 ? dc : (x.time || '').localeCompare(y.time || '');
+      });
+    }
+    function mergeExLog(a, b) {
+      const m = {};
+      for (const el of [...(a || []), ...(b || [])]) {
+        if (!m[el.date] || (el._savedAt || 0) >= (m[el.date]._savedAt || 0)) m[el.date] = el;
+      }
+      return Object.values(m).sort((x, y) => x.date.localeCompare(y.date));
+    }
+    function mergeProgression(local, cloud) {
+      const m = { ...(local || {}) };
+      for (const [k, v] of Object.entries(cloud || {})) {
+        if (!m[k] || v.level > m[k].level || (v.level === m[k].level && v.streak > m[k].streak)) m[k] = v;
+      }
+      return m;
+    }
+    function mergeRunProt(local, cloud) {
+      const lS = local?.sessions || [], cS = cloud?.sessions || [];
+      const map = {};
+      for (const s of [...lS, ...cS]) {
+        const key = `${s.date}_${s.week}_${s.sessionNum}`;
+        if (!map[key]) map[key] = s;
+      }
+      return { currentWeek: Math.max(local?.currentWeek || 1, cloud?.currentWeek || 1), sessions: Object.values(map).sort((a, b) => a.date.localeCompare(b.date)) };
+    }
+    function mergeAppData(local, cloud) {
+      if (!cloud || typeof cloud !== 'object') return local;
+      return {
+        checkins:    mergeCheckins(local.checkins, cloud.checkins),
+        exerciseLog: mergeExLog(local.exerciseLog, cloud.exerciseLog),
+        progression: mergeProgression(local.progression, cloud.progression),
+        runProtocol: mergeRunProt(local.runProtocol, cloud.runProtocol),
+      };
+    }
+    async function cloudPull(url) {
+      const sep = url.includes('?') ? '&' : '?';
+      const r = await fetch(url + sep + '_t=' + Date.now(), { redirect: 'follow' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return JSON.parse(await r.text());
+    }
+    async function cloudPush(url, payload) {
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ ...payload, _pushedAt: new Date().toISOString() }),
+        redirect: 'follow',
+      });
+    }
+
     // ─── COMPUTATIONS ──────────────────────────────────────────────────────
+
+    // helpers for multi-checkin-per-day
+    const dayCIs = (checkins, date) =>
+      checkins.filter(c => c.date === date).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    const latestHRV = (checkins, date, hrvSheet) => {
+      const withHRV = [...dayCIs(checkins, date)].reverse().find(c => c.hrv);
+      return withHRV?.hrv ?? hrvSheet.find(h => h.date === date)?.hrv ?? null;
+    };
+    const dayMaxPain = (checkins, date) => {
+      const cis = dayCIs(checkins, date).filter(c => c.painR != null);
+      return cis.length ? { painR: Math.max(...cis.map(c => c.painR)), painL: Math.max(...cis.map(c => c.painL ?? 0)) } : null;
+    };
+    const normaliseCI = (ci, idx) => ({
+      ...ci,
+      id: ci.id || `ci_${ci.date}_${idx}`,
+      activityTypes: ci.activityTypes || (ci.activityType ? [ci.activityType] : []),
+    });
 
     function recoveryStatus(checkins, hrvSheet) {
       const cutoff = addDays(today(), -7);
       const rec = checkins.filter(c => c.date >= cutoff);
       const hrvsAll = [];
       Array.from({ length: 7 }, (_, i) => addDays(today(), -6 + i)).forEach(d => {
-        const ci = rec.find(c => c.date === d);
-        const sh = hrvSheet.find(h => h.date === d);
-        const v = ci?.hrv ?? sh?.hrv;
+        const v = latestHRV(rec, d, hrvSheet);
         if (v) hrvsAll.push(v);
       });
       const avgHRV = hrvsAll.length ? hrvsAll.reduce((a, b) => a + b, 0) / hrvsAll.length : null;
-      const pains = rec.filter(c => c.painR != null && c.painL != null);
+      const uniqueDates = [...new Set(rec.map(c => c.date))];
+      const pains = uniqueDates.map(d => dayMaxPain(rec, d)).filter(Boolean);
       const avgPain = pains.length ? pains.reduce((a, c) => a + Math.max(c.painR, c.painL), 0) / pains.length : null;
       if (!avgHRV && avgPain == null) return { label: 'NO DATA', color: C.muted, emoji: '⚪' };
       const ratio = avgHRV ? avgHRV / HRV_BASELINE : null;
@@ -222,7 +298,10 @@
 
     function computeInsights(checkins, progression) {
       const out = [];
-      const sorted = [...checkins].sort((a, b) => b.date.localeCompare(a.date));
+      const sorted = [...checkins].sort((a, b) => {
+        const dc = b.date.localeCompare(a.date);
+        return dc !== 0 ? dc : (b.time || '').localeCompare(a.time || '');
+      });
       let rStreak = 0;
       for (const c of sorted) { if ((c.painR ?? 99) <= 2) rStreak++; else break; }
       if (rStreak >= 4) out.push(`Right knee pain ≤2 for ${rStreak} days — earliest Week 1 run: ${fmtShort(addDays(today(), 1))}`);
@@ -251,7 +330,7 @@
     function Tip({ active, payload, label }) {
       if (!active || !payload?.length) return null;
       return (
-        <div style={{ background: '#0d1117', border: `1px solid ${C.border2}`, padding: '8px 12px', fontSize: 12, fontFamily: MONO }}>
+        <div style={{ background: C.surface, border: `1px solid ${C.border2}`, padding: '8px 12px', fontSize: 12, fontFamily: MONO, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
           <div style={{ color: C.textDim, marginBottom: 4 }}>{label}</div>
           {payload.map((p, i) => p.value != null && (
             <div key={i} style={{ color: p.color || C.text }}>{p.name}: {p.value}</div>
@@ -320,9 +399,10 @@
 
     function Dashboard({ checkins, hrvSheet }) {
       const td = today();
-      const todayCI = checkins.find(c => c.date === td);
+      const todayCIs = dayCIs(checkins, td);
+      const todayCI = todayCIs[todayCIs.length - 1] || null; // latest today
       const daysInj = daysSince(INJURY_DATE);
-      const todayHRV = todayCI?.hrv ?? hrvSheet.find(h => h.date === td)?.hrv ?? null;
+      const todayHRV = latestHRV(checkins, td, hrvSheet);
       const hrvDelta = todayHRV != null ? todayHRV - HRV_BASELINE : null;
       const recov = useMemo(() => recoveryStatus(checkins, hrvSheet), [checkins, hrvSheet]);
       const ins = useMemo(() => computeInsights(checkins, {}), [checkins]);
@@ -331,25 +411,20 @@
       const chartData = useMemo(() => {
         const dates = Array.from({ length: 30 }, (_, i) => addDays(td, -29 + i));
         return dates.map((date, idx) => {
-          const ci = checkins.find(c => c.date === date);
-          const sh = hrvSheet.find(h => h.date === date);
-          const hrv = ci?.hrv ?? sh?.hrv ?? null;
+          const hrv = latestHRV(checkins, date, hrvSheet);
           const window7 = dates.slice(Math.max(0, idx - 6), idx + 1);
-          const vals = window7.map(d => {
-            const c2 = checkins.find(c => c.date === d);
-            const s2 = hrvSheet.find(h => h.date === d);
-            return c2?.hrv ?? s2?.hrv ?? null;
-          }).filter(Boolean);
+          const vals = window7.map(d => latestHRV(checkins, d, hrvSheet)).filter(Boolean);
           const hrv7 = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
-          return { label: fmtShort(date), hrv, hrv7, stress: ci?.workStress ?? null };
+          const latestToday = dayCIs(checkins, date).slice(-1)[0];
+          return { label: fmtShort(date), hrv, hrv7, stress: latestToday?.workStress ?? null };
         });
       }, [checkins, hrvSheet, td]);
 
       const painData = useMemo(() => {
         return Array.from({ length: 14 }, (_, i) => {
           const date = addDays(td, -13 + i);
-          const ci = checkins.find(c => c.date === date);
-          return { label: fmtShort(date), painR: ci?.painR ?? null, painL: ci?.painL ?? null };
+          const mp = dayMaxPain(checkins, date);
+          return { label: fmtShort(date), painR: mp?.painR ?? null, painL: mp?.painL ?? null };
         });
       }, [checkins, td]);
 
@@ -361,11 +436,13 @@
           { type: 'Physio', color: C.warn, count: 0 },
         ];
         Array.from({ length: 7 }, (_, i) => addDays(td, -6 + i)).forEach(d => {
-          const ci = checkins.find(c => c.date === d);
-          if (ci?.activityType === 'Run') types[0].count++;
-          else if (ci?.activityType === 'Cross-train') types[1].count++;
-          else if (ci?.activityType === 'Rest') types[2].count++;
-          else if (ci?.activityType === 'Physio session') types[3].count++;
+          dayCIs(checkins, d).forEach(ci => {
+            const acts = ci.activityTypes || (ci.activityType ? [ci.activityType] : []);
+            if (acts.includes('Run')) types[0].count++;
+            if (acts.includes('Cross-train')) types[1].count++;
+            if (acts.includes('Rest')) types[2].count++;
+            if (acts.includes('Physio session')) types[3].count++;
+          });
         });
         return types;
       }, [checkins, td]);
@@ -382,10 +459,10 @@
             <MetricCard label="HRV Today" value={todayHRV} unit="ms"
               sub={hrvDelta != null ? `${hrvDelta > 0 ? '+' : ''}${hrvDelta}ms vs baseline` : `Baseline: ${HRV_BASELINE}ms`}
               color={hrvColor} animate />
-            <MetricCard label="Pain (R)" value={todayCI?.painR} unit="/10" sub="Right knee — primary"
-              color={todayCI?.painR > 5 ? C.crit : todayCI?.painR > 2 ? C.warn : C.right} animate />
             <MetricCard label="Pain (L)" value={todayCI?.painL} unit="/10" sub="Left knee — secondary"
               color={todayCI?.painL > 5 ? C.crit : todayCI?.painL > 2 ? C.warn : C.left} animate />
+            <MetricCard label="Pain (R)" value={todayCI?.painR} unit="/10" sub="Right knee — primary"
+              color={todayCI?.painR > 5 ? C.crit : todayCI?.painR > 2 ? C.warn : C.right} animate />
             <MetricCard label="Work Stress" value={todayCI?.workStress} unit="/5"
               color={todayCI?.workStress >= 4 ? C.crit : todayCI?.workStress >= 3 ? C.warn : C.hrv} animate />
             <div style={{
@@ -484,146 +561,209 @@
 
     function CheckIn({ checkins, setCheckins, hrvSheet }) {
       const td = today();
-      const existing = checkins.find(c => c.date === td);
-      const sheetHRV = hrvSheet.find(h => h.date === td)?.hrv ?? null;
+      const nowTime = () => new Date().toTimeString().slice(0, 5);
 
-      const [form, setForm] = useState(() => existing || {
-        date: td, hrv: sheetHRV, hrvManual: false,
-        workStress: null, painR: 0, painL: 0, activityType: null, notes: ''
-      });
+      const [selectedDate, setSelectedDate] = useState(td);
+      const [editingId, setEditingId] = useState(null);
 
-      useEffect(() => {
-        if (existing) setForm(existing);
-      }, [td]);
+      const dateCheckins = useMemo(() =>
+        checkins.filter(c => c.date === selectedDate).sort((a, b) => (a.time || '').localeCompare(b.time || '')),
+        [checkins, selectedDate]
+      );
+
+      const sheetHRV = hrvSheet.find(h => h.date === selectedDate)?.hrv ?? null;
+      const emptyForm = () => ({ time: nowTime(), hrv: sheetHRV, hrvManual: false, workStress: null, painR: 0, painL: 0, activityTypes: [], notes: '' });
+
+      const [form, setForm] = useState(emptyForm);
+
+      useEffect(() => { setForm(emptyForm()); setEditingId(null); }, [selectedDate]); // eslint-disable-line
 
       const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-      const flags = autoFlags(form);
-
+      const toggleActivity = (type) => {
+        const cur = form.activityTypes || [];
+        set('activityTypes', cur.includes(type) ? cur.filter(t => t !== type) : [...cur, type]);
+      };
+      const startEdit = (ci) => { setEditingId(ci.id); setForm({ ...normaliseCI(ci, 0) }); };
+      const startNew  = () => { setEditingId(null); setForm(emptyForm()); };
+      const deleteEntry = (id) => {
+        const updated = checkins.filter(c => c.id !== id);
+        setCheckins(updated); store.set('checkins', updated);
+        if (editingId === id) startNew();
+      };
       const save = () => {
-        const next = checkins.filter(c => c.date !== td);
-        const updated = [...next, { ...form, date: td }].sort((a, b) => a.date.localeCompare(b.date));
-        setCheckins(updated);
-        store.set('checkins', updated);
+        const id = editingId || `ci_${Date.now()}`;
+        const entry = { ...form, id, date: selectedDate, _savedAt: Date.now(),
+          activityTypes: form.activityTypes || [] };
+        const updated = [...checkins.filter(c => c.id !== id), entry]
+          .sort((a, b) => a.date !== b.date ? a.date.localeCompare(b.date) : (a.time || '').localeCompare(b.time || ''));
+        setCheckins(updated); store.set('checkins', updated);
+        if (!editingId) startNew();
       };
 
-      const LabelRow = ({ children }) => (
-        <div style={{ fontSize: 11, color: C.textDim, fontFamily: SANS, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
-          {children}
-        </div>
-      );
-      const Field = ({ children }) => (
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: '14px 16px' }}>
-          {children}
-        </div>
-      );
+      const flags = autoFlags(form);
       const painColor = (v) => v > 5 ? C.crit : v > 2 ? C.warn : C.hrv;
+      const LabelRow = ({ children }) => (
+        <div style={{ fontSize: 11, color: C.textDim, fontFamily: SANS, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{children}</div>
+      );
 
       return (
         <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 640 }}>
           <FlagBanner flags={flags} />
 
-          <Field>
+          {/* Date */}
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: '14px 16px', borderRadius: 10, boxShadow: '0 1px 4px rgba(37,99,235,0.06)' }}>
             <LabelRow>Date</LabelRow>
-            <div style={{ fontFamily: MONO, fontSize: 18, color: C.text }}>{td}</div>
-          </Field>
-
-          <Field>
-            <LabelRow>HRV (ms) {sheetHRV && !form.hrvManual ? '— auto from Sheets' : form.hrvManual ? '— manual override' : ''}</LabelRow>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <input type="number" min={0} max={200} value={form.hrv ?? ''}
-                onChange={e => { set('hrv', e.target.value ? Number(e.target.value) : null); set('hrvManual', true); }}
-                style={{ background: C.surface2, border: `1px solid ${C.border2}`, color: C.text, fontFamily: MONO, fontSize: 24, padding: '6px 10px', width: 90, borderRadius: 2 }}
-              />
-              <span style={{ fontFamily: MONO, fontSize: 13, color: C.textDim }}>ms</span>
-              {form.hrv != null && (
-                <span style={{ fontSize: 11, fontFamily: MONO, color: form.hrv >= HRV_BASELINE ? C.hrv : form.hrv >= HRV_BASELINE * 0.8 ? C.warn : C.crit }}>
-                  {form.hrv >= HRV_BASELINE ? '+' : ''}{form.hrv - HRV_BASELINE} vs baseline
-                </span>
-              )}
-              {sheetHRV && form.hrvManual && (
-                <Btn small onClick={() => { set('hrv', sheetHRV); set('hrvManual', false); }}>
-                  Reset to sheet ({sheetHRV})
-                </Btn>
-              )}
-            </div>
-          </Field>
-
-          <Field>
-            <LabelRow>Work Stress (1–5)</LabelRow>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {[[1, '😌', 'Calm'], [2, '🙂', 'Easy'], [3, '😐', 'Moderate'], [4, '😓', 'Stressed'], [5, '😤', 'Overloaded']].map(([v, icon, label]) => (
-                <button key={v} onClick={() => set('workStress', v)} style={{
-                  background: form.workStress === v ? C.border2 : 'transparent',
-                  border: `1px solid ${form.workStress === v ? C.warn : C.border}`,
-                  color: C.text, padding: '8px 12px', cursor: 'pointer', borderRadius: 2,
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-                  opacity: form.workStress && form.workStress !== v ? 0.4 : 1,
-                }}>
-                  <span style={{ fontSize: 22 }}>{icon}</span>
-                  <span style={{ fontSize: 9, fontFamily: SANS, color: C.textDim }}>{label}</span>
-                </button>
-              ))}
-            </div>
-          </Field>
-
-          <Field>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <LabelRow>Pain — RIGHT Knee (0–10)</LabelRow>
-              <span style={{ fontSize: 10, color: C.right, fontFamily: MONO, letterSpacing: 1 }}>● PRIMARY</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <input type="range" min={0} max={10} value={form.painR}
-                onChange={e => set('painR', Number(e.target.value))}
-                style={{ flex: 1, accentColor: C.right }} />
-              <div style={{
-                width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: painColor(form.painR) + '22', border: `2px solid ${painColor(form.painR)}`,
-                fontFamily: MONO, fontSize: 20, color: painColor(form.painR), borderRadius: 2
-              }}>{form.painR}</div>
-            </div>
-            {form.painR > 2 && <div style={{ fontSize: 11, color: C.warn, fontFamily: MONO, marginTop: 6 }}>▲ Exceeds 2/10 threshold</div>}
-          </Field>
-
-          <Field>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <LabelRow>Pain — LEFT Knee (0–10)</LabelRow>
-              <span style={{ fontSize: 10, color: C.left, fontFamily: MONO, letterSpacing: 1 }}>● SECONDARY</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <input type="range" min={0} max={10} value={form.painL}
-                onChange={e => set('painL', Number(e.target.value))}
-                style={{ flex: 1, accentColor: C.left }} />
-              <div style={{
-                width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: painColor(form.painL) + '22', border: `2px solid ${painColor(form.painL)}`,
-                fontFamily: MONO, fontSize: 20, color: painColor(form.painL), borderRadius: 2
-              }}>{form.painL}</div>
-            </div>
-            {form.painL > 2 && <div style={{ fontSize: 11, color: C.warn, fontFamily: MONO, marginTop: 6 }}>▲ Exceeds 2/10 threshold</div>}
-          </Field>
-
-          <Field>
-            <LabelRow>Activity Type</LabelRow>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {['Run', 'Cross-train', 'Rest', 'Physio session'].map(type => (
-                <Btn key={type} active={form.activityType === type} onClick={() => set('activityType', type)}>{type}</Btn>
-              ))}
-            </div>
-          </Field>
-
-          <Field>
-            <LabelRow>Notes</LabelRow>
-            <textarea value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Free text…"
-              style={{ width: '100%', background: C.surface2, border: `1px solid ${C.border2}`, color: C.text, fontFamily: SANS, fontSize: 13, padding: '8px 10px', resize: 'vertical', minHeight: 60, boxSizing: 'border-box', borderRadius: 2 }}
+            <input type="date" value={selectedDate} max={td} min={addDays(td, -60)}
+              onChange={e => e.target.value && setSelectedDate(e.target.value)}
+              style={{ background: C.surface2, border: `1px solid ${C.border2}`, color: C.text,
+                fontFamily: SANS, fontSize: 15, fontWeight: 500, padding: '6px 10px', borderRadius: 6, cursor: 'pointer' }}
             />
-          </Field>
+            {selectedDate !== td && <div style={{ fontSize: 11, color: C.warn, fontFamily: SANS, marginTop: 6 }}>Past date: {selectedDate}</div>}
+          </div>
 
-          <button onClick={save} style={{
-            background: '#1f6feb', border: 'none', color: '#fff',
-            padding: '12px 24px', fontSize: 13, fontFamily: MONO,
-            cursor: 'pointer', borderRadius: 2, letterSpacing: 1
-          }}>SAVE CHECK-IN</button>
-          {existing && <div style={{ fontSize: 11, color: C.textDim, fontFamily: SANS }}>Updating existing entry for {td}</div>}
+          {/* Existing entries for this date */}
+          {dateCheckins.length > 0 && (
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden', boxShadow: '0 1px 4px rgba(37,99,235,0.06)' }}>
+              <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: C.surface2 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: C.text, fontFamily: SANS }}>{dateCheckins.length} check-in{dateCheckins.length > 1 ? 's' : ''} on {selectedDate}</span>
+                <button onClick={startNew} style={{ background: C.left, color: '#fff', border: 'none', padding: '5px 12px', fontSize: 11, fontFamily: SANS, fontWeight: 600, cursor: 'pointer', borderRadius: 6 }}>+ New</button>
+              </div>
+              {dateCheckins.map(ci => {
+                const acts = ci.activityTypes || (ci.activityType ? [ci.activityType] : []);
+                const isEditing = editingId === ci.id;
+                return (
+                  <div key={ci.id} onClick={() => startEdit(ci)} style={{ padding: '10px 14px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', background: isEditing ? C.surface2 : 'transparent' }}>
+                    <span style={{ fontFamily: MONO, fontSize: 13, color: C.left, minWidth: 40, fontWeight: 600 }}>{ci.time || '—'}</span>
+                    <span style={{ fontFamily: MONO, fontSize: 11, color: ci.hrv >= HRV_BASELINE ? C.hrv : ci.hrv ? C.warn : C.muted, minWidth: 48 }}>{ci.hrv ? ci.hrv + 'ms' : '—'}</span>
+                    <span style={{ fontSize: 11, fontFamily: MONO, color: (ci.painR ?? 0) > 2 ? C.warn : C.right }}>R:{ci.painR ?? '—'}</span>
+                    <span style={{ fontSize: 11, fontFamily: MONO, color: (ci.painL ?? 0) > 2 ? C.warn : C.left }}>L:{ci.painL ?? '—'}</span>
+                    <span style={{ fontSize: 11, color: C.textDim, fontFamily: SANS, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{acts.join(', ') || '—'}</span>
+                    {isEditing && <span style={{ fontSize: 10, color: C.left, fontFamily: MONO, fontWeight: 600 }}>editing</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Form */}
+          <div style={{ background: C.surface, border: `1px solid ${editingId ? C.warn : C.left}`, borderRadius: 10, padding: 16, boxShadow: '0 1px 4px rgba(37,99,235,0.06)' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: editingId ? C.warn : C.left, fontFamily: SANS, marginBottom: 14, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              {editingId ? '✏ Editing entry' : '+ New Check-in'}
+            </div>
+
+            {/* Time */}
+            <div style={{ marginBottom: 14 }}>
+              <LabelRow>Time</LabelRow>
+              <input type="time" value={form.time || ''} onChange={e => set('time', e.target.value)}
+                style={{ background: C.surface2, border: `1px solid ${C.border2}`, color: C.text, fontFamily: MONO, fontSize: 15, padding: '6px 10px', borderRadius: 6 }}
+              />
+            </div>
+
+            {/* HRV */}
+            <div style={{ marginBottom: 14 }}>
+              <LabelRow>HRV (ms) {sheetHRV && !form.hrvManual ? '— auto from Sheets' : form.hrvManual ? '— manual' : ''}</LabelRow>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <input type="number" min={0} max={200} value={form.hrv ?? ''}
+                  onChange={e => { set('hrv', e.target.value ? Number(e.target.value) : null); set('hrvManual', true); }}
+                  style={{ background: C.surface2, border: `1px solid ${C.border2}`, color: C.text, fontFamily: MONO, fontSize: 22, padding: '6px 10px', width: 85, borderRadius: 6 }}
+                />
+                <span style={{ fontFamily: MONO, fontSize: 13, color: C.textDim }}>ms</span>
+                {form.hrv != null && (
+                  <span style={{ fontSize: 11, fontFamily: MONO, color: form.hrv >= HRV_BASELINE ? C.hrv : form.hrv >= HRV_BASELINE * 0.8 ? C.warn : C.crit }}>
+                    {form.hrv >= HRV_BASELINE ? '+' : ''}{form.hrv - HRV_BASELINE} vs baseline
+                  </span>
+                )}
+                {sheetHRV && form.hrvManual && (
+                  <Btn small onClick={() => { set('hrv', sheetHRV); set('hrvManual', false); }}>Reset ({sheetHRV})</Btn>
+                )}
+              </div>
+            </div>
+
+            {/* Work stress */}
+            <div style={{ marginBottom: 14 }}>
+              <LabelRow>Work Stress (1–5)</LabelRow>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {[[1,'😌','Calm'],[2,'🙂','Easy'],[3,'😐','Moderate'],[4,'😓','Stressed'],[5,'😤','Overloaded']].map(([v,icon,label]) => (
+                  <button key={v} onClick={() => set('workStress', v)} style={{
+                    background: form.workStress === v ? C.surface3 : 'transparent',
+                    border: `1px solid ${form.workStress === v ? C.warn : C.border}`,
+                    color: C.text, padding: '7px 10px', cursor: 'pointer', borderRadius: 8,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                    opacity: form.workStress && form.workStress !== v ? 0.4 : 1,
+                  }}>
+                    <span style={{ fontSize: 20 }}>{icon}</span>
+                    <span style={{ fontSize: 9, fontFamily: SANS, color: C.textDim }}>{label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Pain R */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <LabelRow>Pain — RIGHT Knee (0–10)</LabelRow>
+                <span style={{ fontSize: 10, color: C.right, fontFamily: MONO }}>● PRIMARY</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <input type="range" min={0} max={10} value={form.painR} onChange={e => set('painR', Number(e.target.value))} style={{ flex: 1, accentColor: C.right }} />
+                <div style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: painColor(form.painR)+'22', border: `2px solid ${painColor(form.painR)}`, fontFamily: MONO, fontSize: 18, color: painColor(form.painR), borderRadius: 4 }}>{form.painR}</div>
+              </div>
+              {form.painR > 2 && <div style={{ fontSize: 11, color: C.warn, fontFamily: MONO, marginTop: 4 }}>▲ Exceeds 2/10 threshold</div>}
+            </div>
+
+            {/* Pain L */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <LabelRow>Pain — LEFT Knee (0–10)</LabelRow>
+                <span style={{ fontSize: 10, color: C.left, fontFamily: MONO }}>● SECONDARY</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <input type="range" min={0} max={10} value={form.painL} onChange={e => set('painL', Number(e.target.value))} style={{ flex: 1, accentColor: C.left }} />
+                <div style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: painColor(form.painL)+'22', border: `2px solid ${painColor(form.painL)}`, fontFamily: MONO, fontSize: 18, color: painColor(form.painL), borderRadius: 4 }}>{form.painL}</div>
+              </div>
+              {form.painL > 2 && <div style={{ fontSize: 11, color: C.warn, fontFamily: MONO, marginTop: 4 }}>▲ Exceeds 2/10 threshold</div>}
+            </div>
+
+            {/* Activities multi-select */}
+            <div style={{ marginBottom: 14 }}>
+              <LabelRow>Activities (select all that apply)</LabelRow>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {['Run','Cross-train','Strength','Rest','Physio session'].map(type => {
+                  const sel = (form.activityTypes || []).includes(type);
+                  return (
+                    <button key={type} onClick={() => toggleActivity(type)} style={{
+                      background: sel ? C.left+'18' : 'transparent',
+                      border: `1px solid ${sel ? C.left : C.border}`,
+                      color: sel ? C.left : C.textDim,
+                      padding: '7px 14px', fontSize: 12, fontFamily: SANS, fontWeight: sel ? 600 : 400,
+                      cursor: 'pointer', borderRadius: 8
+                    }}>{type}</button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div style={{ marginBottom: 14 }}>
+              <LabelRow>Notes</LabelRow>
+              <textarea value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Free text…"
+                style={{ width: '100%', background: C.surface2, border: `1px solid ${C.border2}`, color: C.text, fontFamily: SANS, fontSize: 13, padding: '8px 10px', resize: 'vertical', minHeight: 60, boxSizing: 'border-box', borderRadius: 6 }}
+              />
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={save} style={{ flex: 1, background: C.left, border: 'none', color: '#fff', padding: '12px', fontSize: 13, fontFamily: SANS, fontWeight: 600, cursor: 'pointer', borderRadius: 8, boxShadow: '0 2px 8px rgba(37,99,235,0.25)' }}>
+                {editingId ? 'Update Entry' : 'Save Check-in'}
+              </button>
+              {editingId && (
+                <>
+                  <button onClick={startNew} style={{ background: 'none', border: `1px solid ${C.border}`, color: C.textDim, padding: '12px 14px', fontSize: 13, fontFamily: SANS, cursor: 'pointer', borderRadius: 8 }}>Cancel</button>
+                  <button onClick={() => deleteEntry(editingId)} style={{ background: C.crit+'15', border: `1px solid ${C.crit}`, color: C.crit, padding: '12px 14px', fontSize: 13, fontFamily: SANS, cursor: 'pointer', borderRadius: 8 }}>Delete</button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       );
     }
@@ -640,7 +780,7 @@
         const level = (progression[key] || { level: 1 }).level;
         const existing = exerciseLog.find(e => e.date === td);
         const updatedCompletions = { ...(existing?.completions || {}), [key]: { done: !current, level } };
-        const newLog = [...exerciseLog.filter(e => e.date !== td), { date: td, completions: updatedCompletions }]
+        const newLog = [...exerciseLog.filter(e => e.date !== td), { date: td, completions: updatedCompletions, _savedAt: Date.now() }]
           .sort((a, b) => a.date.localeCompare(b.date));
         setExerciseLog(newLog);
         store.set('exerciseLog', newLog);
@@ -715,7 +855,8 @@
                       <div style={{ marginBottom: 8 }}>
                         <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, marginBottom: 3 }}>Level {prog.level} — Active</div>
                         <div style={{ fontSize: 13, color: C.text, fontFamily: SANS, marginBottom: 2 }}>{levelDef.name}</div>
-                        <div style={{ fontSize: 11, color: C.textDim, fontFamily: MONO }}>{levelDef.sets} × {levelDef.reps}</div>
+                        <div style={{ fontSize: 11, color: C.textDim, fontFamily: MONO, marginBottom: 6 }}>{levelDef.sets} × {levelDef.reps}</div>
+                        <VideoLink url={VIDEO_MAP[`${id}_${levelDef.n}`]} small />
                       </div>
                       <button onClick={() => toggleDone(id, leg)} style={{
                         background: done ? color + '33' : 'transparent',
@@ -739,8 +880,8 @@
                           <div style={{ fontSize: 12, color: C.textDim, fontFamily: SANS }}>{nextLevelDef.name}</div>
                           {canAdvance && (
                             <button onClick={() => advanceLevel(id, leg)} style={{
-                              background: '#1f6feb22', border: `1px solid #1f6feb`,
-                              color: '#58a6ff', padding: '4px 10px', fontSize: 11,
+                              background: C.left+'15', border: `1px solid ${C.left}`,
+                              color: C.left, padding: '4px 10px', fontSize: 11,
                               fontFamily: MONO, cursor: 'pointer', borderRadius: 2, marginTop: 6
                             }}>
                               ADVANCE TO LEVEL {prog.level + 1}
@@ -859,8 +1000,8 @@
             )}
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button onClick={logSession} style={{
-                background: '#1f6feb22', border: `1px solid #1f6feb`,
-                color: '#58a6ff', padding: '10px 20px', fontSize: 12,
+                background: C.left+'15', border: `1px solid ${C.left}`,
+                color: C.left, padding: '10px 20px', fontSize: 12,
                 fontFamily: MONO, cursor: 'pointer', borderRadius: 2
               }}>+ LOG TODAY'S SESSION</button>
               {canAdvance && (
@@ -908,12 +1049,26 @@
     function History({ checkins }) {
       const [sortDir, setSortDir] = useState('desc');
       const sorted = useMemo(() =>
-        [...checkins].sort((a, b) => sortDir === 'desc' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)),
+        [...checkins].sort((a, b) => {
+          const dc = sortDir === 'desc' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date);
+          if (dc !== 0) return dc;
+          const tc = (a.time || '').localeCompare(b.time || '');
+          return sortDir === 'desc' ? -tc : tc;
+        }),
         [checkins, sortDir]
       );
       const exportCSV = () => {
-        const hdr = ['Date', 'HRV', 'Stress', 'Pain_R', 'Pain_L', 'Activity', 'Notes'];
-        const rows = sorted.map(c => [c.date, c.hrv ?? '', c.workStress ?? '', c.painR ?? '', c.painL ?? '', c.activityType ?? '', (c.notes ?? '').replace(/,/g, ';')]);
+        const hdr = ['Date', 'Time', 'HRV', 'Stress', 'Pain_R', 'Pain_L', 'Activities', 'Notes'];
+        const rows = sorted.map(c => [
+          c.date,
+          c.time ?? '',
+          c.hrv ?? '',
+          c.workStress ?? '',
+          c.painR ?? '',
+          c.painL ?? '',
+          (c.activityTypes || (c.activityType ? [c.activityType] : [])).join(';'),
+          (c.notes ?? '').replace(/,/g, ';'),
+        ]);
         const csv = [hdr, ...rows].map(r => r.join(',')).join('\n');
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
@@ -938,23 +1093,35 @@
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: MONO }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                    {['Date', 'HRV ms', 'Stress', 'Pain R', 'Pain L', 'Activity', 'Notes'].map(h => (
+                    {['Date', 'Time', 'HRV ms', 'Stress', 'Pain R', 'Pain L', 'Activities', 'Notes'].map(h => (
                       <th key={h} style={{ padding: '8px 10px', color: C.textDim, fontFamily: SANS, fontSize: 10, textAlign: 'left', textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {sorted.map((c, i) => (
-                    <tr key={c.date} style={{ borderBottom: `1px solid ${C.border}`, background: i % 2 === 0 ? 'transparent' : '#ffffff08' }}>
-                      <td style={{ padding: '8px 10px', color: C.textDim }}>{c.date}</td>
-                      <td style={{ padding: '8px 10px', color: c.hrv >= HRV_BASELINE ? C.hrv : c.hrv >= HRV_BASELINE * 0.8 ? C.warn : c.hrv ? C.crit : C.textDim }}>{c.hrv ?? '—'}</td>
-                      <td style={{ padding: '8px 10px', color: c.workStress >= 4 ? C.crit : c.workStress >= 3 ? C.warn : C.text }}>{c.workStress ?? '—'}</td>
-                      <td style={{ padding: '8px 10px', color: c.painR > 2 ? C.warn : C.right }}>{c.painR != null ? c.painR : '—'}</td>
-                      <td style={{ padding: '8px 10px', color: c.painL > 2 ? C.warn : C.left }}>{c.painL != null ? c.painL : '—'}</td>
-                      <td style={{ padding: '8px 10px', color: C.text }}>{c.activityType ?? '—'}</td>
-                      <td style={{ padding: '8px 10px', color: C.textDim, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.notes || '—'}</td>
-                    </tr>
-                  ))}
+                  {sorted.map((c, i) => {
+                    const activities = c.activityTypes || (c.activityType ? [c.activityType] : []);
+                    return (
+                      <tr key={c.id || c.date + (c.time || '')} style={{ borderBottom: `1px solid ${C.border}`, background: i % 2 === 0 ? 'transparent' : C.surface3 + '44' }}>
+                        <td style={{ padding: '8px 10px', color: C.textDim }}>{c.date}</td>
+                        <td style={{ padding: '8px 10px', color: C.textDim }}>{c.time || '—'}</td>
+                        <td style={{ padding: '8px 10px', color: c.hrv >= HRV_BASELINE ? C.hrv : c.hrv >= HRV_BASELINE * 0.8 ? C.warn : c.hrv ? C.crit : C.textDim }}>{c.hrv ?? '—'}</td>
+                        <td style={{ padding: '8px 10px', color: c.workStress >= 4 ? C.crit : c.workStress >= 3 ? C.warn : C.text }}>{c.workStress ?? '—'}</td>
+                        <td style={{ padding: '8px 10px', color: c.painR > 2 ? C.warn : C.right }}>{c.painR != null ? c.painR : '—'}</td>
+                        <td style={{ padding: '8px 10px', color: c.painL > 2 ? C.warn : C.left }}>{c.painL != null ? c.painL : '—'}</td>
+                        <td style={{ padding: '8px 10px', color: C.text }}>
+                          {activities.length > 0 ? (
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                              {activities.map(a => (
+                                <span key={a} style={{ background: C.surface3, border: `1px solid ${C.border}`, borderRadius: 4, padding: '1px 6px', fontSize: 10, fontFamily: SANS, color: C.text }}>{a}</span>
+                              ))}
+                            </div>
+                          ) : '—'}
+                        </td>
+                        <td style={{ padding: '8px 10px', color: C.textDim, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.notes || '—'}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -966,10 +1133,10 @@
     // ─── EXERCISE GUIDE ────────────────────────────────────────────────────
 
     const GC = {
-      right: '#f97316', left: '#3b82f6', arrow: '#10b981',
-      warn: '#f59e0b', muted: '#8b949e', body: '#c8a882', bone: '#e2d5c3',
-      equipment: '#6b7280', equipmentAccent: '#f59e0b',
-      surface: '#1e2530', bg: '#0d1117', card: '#161b22', border: '#21262d', text: '#e6edf3',
+      right: '#ea580c', left: '#2563eb', arrow: '#059669',
+      warn: '#d97706', muted: '#94a3b8', body: '#b07850', bone: '#d4b896',
+      equipment: '#64748b', equipmentAccent: '#d97706',
+      surface: '#f8fbff', bg: '#edf3fb', card: '#ffffff', border: '#ccddf2', text: '#0f172a',
     };
     const tagColors = { QUAD: '#8b5cf6', HAMSTRING: '#f97316', GLUTE: '#10b981', CALF: '#3b82f6' };
 
@@ -1326,6 +1493,120 @@
         ]},
     ];
 
+    // ─── VIDEO MAP ─────────────────────────────────────────────────────────
+
+    const VIDEO_MAP = {
+      '1A_1': 'https://www.youtube.com/shorts/495P768V5sQ',
+      '1A_2': 'https://www.youtube.com/shorts/_vCnf68dN_A',
+      '1A_3': 'https://www.youtube.com/shorts/Efd-SJQFQoA',
+      '1B_1': 'https://www.youtube.com/watch?v=vOiHvzj5XhA',
+      '1B_2': 'https://www.youtube.com/shorts/66aDjM8BoV4',
+      '1B_3A': 'https://www.youtube.com/shorts/66aDjM8BoV4',
+      '1B_3B': 'https://www.youtube.com/shorts/66aDjM8BoV4',
+      '2A_1': 'https://www.youtube.com/watch?v=_FSmimFjUe4',
+      '2A_2': 'https://www.youtube.com/watch?v=qby11kFGn2g',
+      '2A_3': 'https://www.youtube.com/watch?v=qby11kFGn2g',
+      '2A_4': 'https://www.youtube.com/watch?v=3-4pKUhkzoQ',
+      '2B_1': 'https://www.youtube.com/watch?v=3-4pKUhkzoQ',
+      '2B_2': 'https://www.youtube.com/watch?v=3-4pKUhkzoQ',
+      '2B_3': 'https://www.youtube.com/watch?v=3-4pKUhkzoQ',
+      '3A_1': 'https://www.youtube.com/shorts/vYb54dQL-xU',
+      '3A_2': 'https://www.youtube.com/watch?v=CfihcLp3Nuw',
+      '3A_3': 'https://www.youtube.com/watch?v=CfihcLp3Nuw',
+      '3B_1': 'https://www.youtube.com/watch?v=_D_e9zXKfiQ',
+      '3B_2': 'https://www.youtube.com/watch?v=_D_e9zXKfiQ',
+      '3B_3': 'https://www.youtube.com/watch?v=_D_e9zXKfiQ',
+      '4A_1': 'https://www.youtube.com/watch?v=4josoSC3RFI',
+      '4A_2': 'https://www.youtube.com/watch?v=4josoSC3RFI',
+      '4A_3': 'https://www.youtube.com/watch?v=4josoSC3RFI',
+      '4B_1': 'https://www.youtube.com/watch?v=4josoSC3RFI',
+      '4B_2': 'https://www.youtube.com/watch?v=4josoSC3RFI',
+      '4B_3': 'https://www.youtube.com/watch?v=4josoSC3RFI',
+    };
+
+    const VideoLink = ({ url, small }) => url ? (
+      <a href={url} target="_blank" rel="noopener noreferrer" style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        color: '#dc2626', fontFamily: MONO, fontSize: small ? 10 : 11,
+        textDecoration: 'none', border: '1px solid #dc262640',
+        background: '#dc262612', padding: small ? '3px 8px' : '5px 12px', borderRadius: 4,
+      }}>▶ Watch demo</a>
+    ) : null;
+
+    // ─── SYNC SETUP MODAL ─────────────────────────────────────────────────
+
+    const APPS_SCRIPT_CODE = `function doGet(e) {
+  var sh = getOrCreate();
+  var v = sh.getRange('A1').getValue();
+  return ContentService
+    .createTextOutput(v || '{}')
+    .setMimeType(ContentService.MimeType.JSON);
+}
+function doPost(e) {
+  var sh = getOrCreate();
+  sh.getRange('A1').setValue(e.postData.contents);
+  sh.getRange('B1').setValue(new Date().toISOString());
+  return ContentService
+    .createTextOutput('{"ok":true}')
+    .setMimeType(ContentService.MimeType.JSON);
+}
+function getOrCreate() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  return ss.getSheetByName('AppSync')
+    || ss.insertSheet('AppSync');
+}`;
+
+    function SyncSetup({ syncUrl, onSave, onClose }) {
+      const [url, setUrl] = React.useState(syncUrl || '');
+      const [copied, setCopied] = React.useState(false);
+      const copyScript = () => {
+        navigator.clipboard.writeText(APPS_SCRIPT_CODE).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+      };
+      return (
+        <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.45)', zIndex:200, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:14, padding:24, maxWidth:520, width:'100%', boxShadow:'0 12px 40px rgba(37,99,235,0.15)', maxHeight:'90vh', overflowY:'auto' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+              <div style={{ fontSize:16, fontWeight:700, color:C.text }}>☁ Cloud Sync Setup</div>
+              <button onClick={onClose} style={{ background:'none', border:'none', color:C.textDim, cursor:'pointer', fontSize:20, lineHeight:1 }}>✕</button>
+            </div>
+            <div style={{ fontSize:12, color:C.textDim, lineHeight:1.7, marginBottom:16 }}>
+              Uses a Google Apps Script as a free sync backend. Your data lives in your own Google Sheet — no third-party servers, no cost.
+            </div>
+            <div style={{ background:C.surface2, border:`1px solid ${C.border}`, borderRadius:8, padding:14, marginBottom:14 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:C.text, marginBottom:8, textTransform:'uppercase', letterSpacing:1 }}>Setup (one time, ~2 min)</div>
+              {[['Open your Google Sheet','→ Extensions → Apps Script'],['Paste the script below','→ click Copy Script, then Ctrl+S to save'],['Deploy','→ Deploy → New deployment → Web app'],['Configure','→ Execute as: Me · Who has access: Anyone'],['Copy the URL','→ paste it in the field below']].map(([a,b],i) => (
+                <div key={i} style={{ display:'flex', gap:8, marginBottom:5, fontSize:12 }}>
+                  <span style={{ color:C.left, fontFamily:MONO, minWidth:18, fontWeight:700 }}>{i+1}.</span>
+                  <span style={{ color:C.text, fontWeight:600 }}>{a}</span>
+                  <span style={{ color:C.textDim }}>{b}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ position:'relative', marginBottom:14 }}>
+              <div style={{ background:'#1e2530', border:`1px solid #30363d`, borderRadius:8, padding:12, fontFamily:MONO, fontSize:10, color:'#e6edf3', overflowX:'auto', whiteSpace:'pre', lineHeight:1.6 }}>
+                {APPS_SCRIPT_CODE}
+              </div>
+              <button onClick={copyScript} style={{ position:'absolute', top:8, right:8, background:copied?C.hrv:C.left, color:'#fff', border:'none', padding:'4px 10px', fontSize:11, fontFamily:SANS, fontWeight:600, cursor:'pointer', borderRadius:4 }}>
+                {copied ? '✓ Copied' : 'Copy Script'}
+              </button>
+            </div>
+            <div style={{ fontSize:11, fontWeight:600, color:C.textDim, textTransform:'uppercase', letterSpacing:1, marginBottom:6 }}>Deployment URL</div>
+            <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://script.google.com/macros/s/…/exec"
+              style={{ width:'100%', background:C.surface2, border:`1px solid ${C.border2}`, color:C.text, fontFamily:SANS, fontSize:13, padding:'9px 12px', borderRadius:8, marginBottom:14, boxSizing:'border-box', outline:'none' }}
+            />
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={() => onSave(url.trim())} style={{ flex:1, background:C.left, color:'#fff', border:'none', padding:'11px', fontSize:13, fontFamily:SANS, fontWeight:600, cursor:'pointer', borderRadius:8, boxShadow:'0 2px 8px rgba(37,99,235,0.25)' }}>
+                Save &amp; Sync Now
+              </button>
+              <button onClick={onClose} style={{ background:'none', border:`1px solid ${C.border}`, color:C.textDim, padding:'11px 16px', fontSize:13, fontFamily:SANS, cursor:'pointer', borderRadius:8 }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function ExerciseGuide() {
       const [activeTrack, setActiveTrack] = useState('1A');
       const [activeLevel, setActiveLevel] = useState(0);
@@ -1418,6 +1699,7 @@
                     <span>⚠</span>
                     <span style={{ fontFamily:MONO, fontSize:10, color:GC.equipmentAccent }}>Pain ≤2/10 during. Baseline within 24h.</span>
                   </div>
+                  <div><VideoLink url={VIDEO_MAP[`${track.id}_${exercise.level}`]} /></div>
 
                   {exercise.legNote && (
                     <div style={{ background:`${GC.right}10`, border:`1px solid ${GC.right}30`, padding:'7px 12px' }}>
@@ -1467,18 +1749,26 @@
 
     function App() {
       const [activeTab, setActiveTab] = useState('dashboard');
-      const [checkins, setCheckins] = useState(() => store.get('checkins') || []);
+      const [checkins, setCheckins] = useState(() => {
+        const raw = store.get('checkins') || [];
+        return raw.map((ci, i) => normaliseCI(ci, i));
+      });
       const [exerciseLog, setExerciseLog] = useState(() => store.get('exerciseLog') || []);
       const [progression, setProgression] = useState(() => store.get('progression') || {});
       const [runProtocol, setRunProtocol] = useState(() => store.get('runProtocol') || { currentWeek: 1, sessions: [] });
       const [hrvSheet, setHrvSheet] = useState(() => store.get('hrvData') || []);
       const [syncState, setSyncState] = useState({ loading: false, lastSync: store.get('lastSync'), error: null });
       const [storageErr, setStorageErr] = useState(null);
+      const [syncUrl, setSyncUrl] = useState(() => store.get('syncUrl') || '');
+      const [cloudState, setCloudState] = useState({ syncing: false, lastSync: store.get('cloudLastSync'), error: null });
+      const [showSyncSetup, setShowSyncSetup] = useState(false);
+      const cloudPushTimer = React.useRef(null);
+      const isMounting = React.useRef(true);
 
       useEffect(() => {
         const link = document.createElement('link');
         link.rel = 'stylesheet';
-        link.href = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap';
+        link.href = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Montserrat:wght@400;500;600;700&display=swap';
         document.head.appendChild(link);
         const ok = store.set('_ping', 1);
         if (!ok) setStorageErr('Storage unavailable — data will not persist between sessions');
@@ -1500,6 +1790,44 @@
 
       useEffect(() => { doSync(); }, []);
 
+      // Pull from cloud on mount / when URL changes
+      useEffect(() => {
+        if (!syncUrl) { isMounting.current = false; return; }
+        const local = { checkins, exerciseLog, progression, runProtocol };
+        setCloudState(s => ({ ...s, syncing: true, error: null }));
+        cloudPull(syncUrl)
+          .then(cloud => {
+            const merged = mergeAppData(local, cloud);
+            setCheckins(merged.checkins);       store.set('checkins', merged.checkins);
+            setExerciseLog(merged.exerciseLog); store.set('exerciseLog', merged.exerciseLog);
+            setProgression(merged.progression); store.set('progression', merged.progression);
+            setRunProtocol(merged.runProtocol); store.set('runProtocol', merged.runProtocol);
+            return cloudPush(syncUrl, merged);
+          })
+          .then(() => {
+            const ts = new Date().toISOString();
+            store.set('cloudLastSync', ts);
+            setCloudState({ syncing: false, lastSync: ts, error: null });
+          })
+          .catch(e => setCloudState(s => ({ ...s, syncing: false, error: e.message })))
+          .finally(() => { isMounting.current = false; });
+      }, [syncUrl]); // eslint-disable-line
+
+      // Auto-push 2 s after any data change
+      useEffect(() => {
+        if (isMounting.current || !syncUrl) return;
+        clearTimeout(cloudPushTimer.current);
+        cloudPushTimer.current = setTimeout(() => {
+          cloudPush(syncUrl, { checkins, exerciseLog, progression, runProtocol })
+            .then(() => { const ts = new Date().toISOString(); store.set('cloudLastSync', ts); setCloudState(s => ({ ...s, lastSync: ts, error: null })); })
+            .catch(e => setCloudState(s => ({ ...s, error: e.message })));
+        }, 2000);
+      }, [checkins, exerciseLog, progression, runProtocol]); // eslint-disable-line
+
+      const handleSyncUrlSave = (url) => {
+        setSyncUrl(url); store.set('syncUrl', url); setShowSyncSetup(false); isMounting.current = true;
+      };
+
       const recov = useMemo(() => recoveryStatus(checkins, hrvSheet), [checkins, hrvSheet]);
       const tabs = [
         { id: 'dashboard', label: 'Dashboard' },
@@ -1512,6 +1840,7 @@
 
       return (
         <div style={{ background: C.bg, color: C.text, minHeight: '100vh', fontFamily: SANS, fontSize: 14 }}>
+          {showSyncSetup && <SyncSetup syncUrl={syncUrl} onSave={handleSyncUrlSave} onClose={() => setShowSyncSetup(false)} />}
           <style>{`
             * { box-sizing: border-box; margin: 0; padding: 0; }
             ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -1526,24 +1855,36 @@
             background: C.surface, borderBottom: `1px solid ${C.border}`,
             padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap'
           }}>
-            <div style={{ fontFamily: MONO, fontSize: 13, color: C.text, letterSpacing: 2 }}>ITBS REHAB</div>
+            <div style={{ fontFamily: SANS, fontSize: 15, color: C.text, fontWeight: 700, letterSpacing: 1 }}>ITBS REHAB</div>
             <div style={{ width: 1, height: 20, background: C.border }} />
-            <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS }}>Bilateral · E3 Protocol · Diagnofisic Milano · April 11, 2026</div>
+            <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS }}>Bilateral · E3 Protocol · Diagnofisic Milano</div>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                 <span style={{ fontSize: 16 }}>{recov.emoji}</span>
                 <span style={{ fontSize: 10, color: recov.color, fontFamily: MONO, letterSpacing: 1 }}>{recov.label}</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {syncState.error && <span style={{ fontSize: 10, color: C.warn, fontFamily: MONO }}>⚠ Sync failed</span>}
-                {!syncState.error && syncState.lastSync && (
-                  <span style={{ fontSize: 10, color: C.textDim, fontFamily: MONO }}>Synced {fmtTime(syncState.lastSync)}</span>
-                )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {syncState.error && <span style={{ fontSize: 10, color: C.warn, fontFamily: MONO }}>⚠ HRV failed</span>}
                 <button onClick={doSync} disabled={syncState.loading} style={{
                   background: 'transparent', border: `1px solid ${C.border}`,
                   color: C.textDim, padding: '4px 10px', fontSize: 10, fontFamily: MONO,
-                  cursor: 'pointer', borderRadius: 2
-                }}>{syncState.loading ? 'SYNCING…' : '⟳ SYNC HRV'}</button>
+                  cursor: 'pointer', borderRadius: 4
+                }}>{syncState.loading ? '⟳…' : '⟳ HRV'}</button>
+                <div style={{ display:'flex', alignItems:'center', gap:6, borderLeft:`1px solid ${C.border}`, paddingLeft:8 }}>
+                  {cloudState.error
+                    ? <span style={{ fontSize:10, color:C.crit, fontFamily:MONO }}>☁ error</span>
+                    : cloudState.syncing
+                    ? <span style={{ fontSize:10, color:C.left, fontFamily:MONO }}>☁ syncing…</span>
+                    : syncUrl && cloudState.lastSync
+                    ? <span style={{ fontSize:10, color:C.hrv, fontFamily:MONO }}>☁ {fmtTime(cloudState.lastSync)}</span>
+                    : <span style={{ fontSize:10, color:C.muted, fontFamily:MONO }}>☁ not set up</span>
+                  }
+                  <button onClick={() => setShowSyncSetup(true)} style={{
+                    background: syncUrl ? C.left+'15' : C.surface3, border:`1px solid ${syncUrl ? C.left+'50' : C.border}`,
+                    color: syncUrl ? C.left : C.textDim, padding:'4px 10px', fontSize:11,
+                    fontFamily:SANS, fontWeight:600, cursor:'pointer', borderRadius:4
+                  }}>⚙ Sync</button>
+                </div>
               </div>
             </div>
           </div>
@@ -1565,7 +1906,7 @@
             {tabs.map(t => (
               <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
                 background: 'transparent',
-                borderBottom: `2px solid ${activeTab === t.id ? '#58a6ff' : 'transparent'}`,
+                borderBottom: `2px solid ${activeTab === t.id ? C.left : 'transparent'}`,
                 borderTop: 'none', borderLeft: 'none', borderRight: 'none',
                 color: activeTab === t.id ? C.text : C.textDim,
                 padding: '10px 18px', fontSize: 12, fontFamily: SANS,
