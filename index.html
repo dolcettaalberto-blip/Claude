@@ -416,7 +416,9 @@
           const vals = window7.map(d => latestHRV(checkins, d, hrvSheet)).filter(Boolean);
           const hrv7 = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
           const latestToday = dayCIs(checkins, date).slice(-1)[0];
-          return { label: fmtShort(date), hrv, hrv7, stress: latestToday?.workStress ?? null };
+          const sleepCIs = dayCIs(checkins, date).filter(c => c.sleepHours != null);
+          const sleep = sleepCIs.length ? sleepCIs[sleepCIs.length - 1].sleepHours : null;
+          return { label: fmtShort(date), hrv, hrv7, stress: latestToday?.workStress ?? null, sleep };
         });
       }, [checkins, hrvSheet, td]);
 
@@ -465,6 +467,9 @@
               color={todayCI?.painR > 5 ? C.crit : todayCI?.painR > 2 ? C.warn : C.right} animate />
             <MetricCard label="Work Stress" value={todayCI?.workStress} unit="/5"
               color={todayCI?.workStress >= 4 ? C.crit : todayCI?.workStress >= 3 ? C.warn : C.hrv} animate />
+            <MetricCard label="Sleep" value={todayCI?.sleepHours} unit="h"
+              sub={todayCI?.sleepQuality != null ? ['','Poor','Fair','OK','Good','Great'][todayCI.sleepQuality] : 'hours last night'}
+              color={todayCI?.sleepHours >= 7 ? C.hrv : todayCI?.sleepHours >= 6 ? C.warn : todayCI?.sleepHours != null ? C.crit : C.muted} animate />
             <div style={{
               background: C.surface, border: `2px solid ${recov.color}`,
               padding: '10px 18px', display: 'flex', flexDirection: 'column',
@@ -479,23 +484,24 @@
           {/* HRV chart */}
           <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: 16 }}>
             <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>
-              HRV 30-Day + Work Stress Overlay
+              HRV 30-Day + Stress &amp; Sleep Overlay
             </div>
             <ResponsiveContainer width="100%" height={170}>
               <ComposedChart data={chartData} margin={{ left: 0, right: 30, top: 5, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 9, fill: C.textDim, fontFamily: MONO }} interval={4} />
                 <YAxis yAxisId="h" domain={[20, 100]} tick={{ fontSize: 9, fill: C.textDim, fontFamily: MONO }} width={30} />
-                <YAxis yAxisId="s" orientation="right" domain={[0, 6]} tick={{ fontSize: 9, fill: C.muted, fontFamily: MONO }} width={20} />
+                <YAxis yAxisId="s" orientation="right" domain={[0, 12]} tick={{ fontSize: 9, fill: C.muted, fontFamily: MONO }} width={20} />
                 <Tooltip content={<Tip />} />
                 <ReferenceLine yAxisId="h" y={HRV_BASELINE} stroke={C.warn} strokeDasharray="5 3" strokeWidth={1} />
                 <Line yAxisId="h" dataKey="hrv" name="HRV" stroke={C.hrv} strokeWidth={1.5} dot={false} connectNulls={false} />
                 <Line yAxisId="h" dataKey="hrv7" name="7d avg" stroke={C.hrv + '66'} strokeWidth={1} dot={false} strokeDasharray="4 3" connectNulls />
                 <Line yAxisId="s" dataKey="stress" name="Stress" stroke={C.muted} strokeWidth={1} dot={false} connectNulls={false} opacity={0.7} />
+                <Line yAxisId="s" dataKey="sleep" name="Sleep h" stroke='#8b5cf6' strokeWidth={1.5} dot={false} connectNulls={false} opacity={0.85} />
               </ComposedChart>
             </ResponsiveContainer>
-            <div style={{ display: 'flex', gap: 16, marginTop: 6 }}>
-              {[['HRV', C.hrv], ['7d avg', C.hrv + '66'], ['Stress', C.muted], [`Baseline ${HRV_BASELINE}ms`, C.warn]].map(([l, c]) => (
+            <div style={{ display: 'flex', gap: 16, marginTop: 6, flexWrap: 'wrap' }}>
+              {[['HRV', C.hrv], ['7d avg', C.hrv + '66'], ['Stress', C.muted], ['Sleep h', '#8b5cf6'], [`Baseline ${HRV_BASELINE}ms`, C.warn]].map(([l, c]) => (
                 <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <div style={{ width: 16, height: 2, background: c }} />
                   <span style={{ fontSize: 10, color: C.textDim, fontFamily: SANS }}>{l}</span>
@@ -572,7 +578,7 @@
       );
 
       const sheetHRV = hrvSheet.find(h => h.date === selectedDate)?.hrv ?? null;
-      const emptyForm = () => ({ time: nowTime(), hrv: sheetHRV, hrvManual: false, workStress: null, painR: 0, painL: 0, activityTypes: [], notes: '' });
+      const emptyForm = () => ({ time: nowTime(), hrv: sheetHRV, hrvManual: false, workStress: null, sleepHours: null, sleepQuality: null, painR: 0, painL: 0, activityTypes: [], notes: '' });
 
       const [form, setForm] = useState(emptyForm);
 
@@ -637,6 +643,7 @@
                     <span style={{ fontFamily: MONO, fontSize: 11, color: ci.hrv >= HRV_BASELINE ? C.hrv : ci.hrv ? C.warn : C.muted, minWidth: 48 }}>{ci.hrv ? ci.hrv + 'ms' : '—'}</span>
                     <span style={{ fontSize: 11, fontFamily: MONO, color: (ci.painR ?? 0) > 2 ? C.warn : C.right }}>R:{ci.painR ?? '—'}</span>
                     <span style={{ fontSize: 11, fontFamily: MONO, color: (ci.painL ?? 0) > 2 ? C.warn : C.left }}>L:{ci.painL ?? '—'}</span>
+                    {ci.sleepHours != null && <span style={{ fontSize: 11, fontFamily: MONO, color: ci.sleepHours >= 7 ? C.hrv : ci.sleepHours >= 6 ? C.warn : C.crit }}>💤{ci.sleepHours}h</span>}
                     <span style={{ fontSize: 11, color: C.textDim, fontFamily: SANS, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{acts.join(', ') || '—'}</span>
                     {isEditing && <span style={{ fontSize: 10, color: C.left, fontFamily: MONO, fontWeight: 600 }}>editing</span>}
                   </div>
@@ -695,6 +702,46 @@
                     <span style={{ fontSize: 9, fontFamily: SANS, color: C.textDim }}>{label}</span>
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* Sleep */}
+            <div style={{ marginBottom: 14 }}>
+              <LabelRow>Sleep</LabelRow>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, marginBottom: 4 }}>Hours</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="number" min={0} max={16} step={0.5} value={form.sleepHours ?? ''}
+                      onChange={e => set('sleepHours', e.target.value ? Number(e.target.value) : null)}
+                      placeholder="—"
+                      style={{ background: C.surface2, border: `1px solid ${C.border2}`, color: C.text, fontFamily: MONO, fontSize: 22, padding: '6px 10px', width: 80, borderRadius: 6 }}
+                    />
+                    <span style={{ fontFamily: MONO, fontSize: 13, color: C.textDim }}>h</span>
+                    {form.sleepHours != null && (
+                      <span style={{ fontSize: 11, fontFamily: MONO, color: form.sleepHours >= 7 ? C.hrv : form.sleepHours >= 6 ? C.warn : C.crit }}>
+                        {form.sleepHours >= 7 ? '✓ Good' : form.sleepHours >= 6 ? '⚠ Low' : '▲ Poor'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, marginBottom: 4 }}>Quality</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {[[1,'😴','Poor'],[2,'😕','Fair'],[3,'😐','OK'],[4,'🙂','Good'],[5,'😊','Great']].map(([v, icon, label]) => (
+                      <button key={v} onClick={() => set('sleepQuality', form.sleepQuality === v ? null : v)} style={{
+                        background: form.sleepQuality === v ? C.surface3 : 'transparent',
+                        border: `1px solid ${form.sleepQuality === v ? C.hrv : C.border}`,
+                        color: C.text, padding: '7px 10px', cursor: 'pointer', borderRadius: 8,
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                        opacity: form.sleepQuality && form.sleepQuality !== v ? 0.4 : 1,
+                      }}>
+                        <span style={{ fontSize: 20 }}>{icon}</span>
+                        <span style={{ fontSize: 9, fontFamily: SANS, color: C.textDim }}>{label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1058,12 +1105,14 @@
         [checkins, sortDir]
       );
       const exportCSV = () => {
-        const hdr = ['Date', 'Time', 'HRV', 'Stress', 'Pain_R', 'Pain_L', 'Activities', 'Notes'];
+        const hdr = ['Date', 'Time', 'HRV', 'Stress', 'Sleep_h', 'Sleep_Q', 'Pain_R', 'Pain_L', 'Activities', 'Notes'];
         const rows = sorted.map(c => [
           c.date,
           c.time ?? '',
           c.hrv ?? '',
           c.workStress ?? '',
+          c.sleepHours ?? '',
+          c.sleepQuality ?? '',
           c.painR ?? '',
           c.painL ?? '',
           (c.activityTypes || (c.activityType ? [c.activityType] : [])).join(';'),
@@ -1093,7 +1142,7 @@
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: MONO }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                    {['Date', 'Time', 'HRV ms', 'Stress', 'Pain R', 'Pain L', 'Activities', 'Notes'].map(h => (
+                    {['Date', 'Time', 'HRV ms', 'Stress', 'Sleep h', 'Sleep Q', 'Pain R', 'Pain L', 'Activities', 'Notes'].map(h => (
                       <th key={h} style={{ padding: '8px 10px', color: C.textDim, fontFamily: SANS, fontSize: 10, textAlign: 'left', textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -1107,6 +1156,8 @@
                         <td style={{ padding: '8px 10px', color: C.textDim }}>{c.time || '—'}</td>
                         <td style={{ padding: '8px 10px', color: c.hrv >= HRV_BASELINE ? C.hrv : c.hrv >= HRV_BASELINE * 0.8 ? C.warn : c.hrv ? C.crit : C.textDim }}>{c.hrv ?? '—'}</td>
                         <td style={{ padding: '8px 10px', color: c.workStress >= 4 ? C.crit : c.workStress >= 3 ? C.warn : C.text }}>{c.workStress ?? '—'}</td>
+                        <td style={{ padding: '8px 10px', color: c.sleepHours >= 7 ? C.hrv : c.sleepHours >= 6 ? C.warn : c.sleepHours != null ? C.crit : C.textDim }}>{c.sleepHours != null ? c.sleepHours + 'h' : '—'}</td>
+                        <td style={{ padding: '8px 10px', color: C.textDim }}>{c.sleepQuality != null ? ['','😴','😕','😐','🙂','😊'][c.sleepQuality] : '—'}</td>
                         <td style={{ padding: '8px 10px', color: c.painR > 2 ? C.warn : C.right }}>{c.painR != null ? c.painR : '—'}</td>
                         <td style={{ padding: '8px 10px', color: c.painL > 2 ? C.warn : C.left }}>{c.painL != null ? c.painL : '—'}</td>
                         <td style={{ padding: '8px 10px', color: C.text }}>
