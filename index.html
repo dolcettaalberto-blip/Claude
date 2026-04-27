@@ -187,6 +187,37 @@
       return data;
     }
 
+    // ─── SLEEP SYNC ────────────────────────────────────────────────────────
+
+    const SLEEP_SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQRo0q5gSheb-e2_Jo-s7y6uIf8mcZcEzyjET61oGfDJ_2bybXh0o8FDErqNrysEMCM3fYu2KfGHyzD/pub?output=csv';
+
+    async function syncSleep() {
+      const resp = await fetch(SLEEP_SHEET_URL);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const csv = await resp.text();
+      const lines = csv.trim().split('\n');
+      if (lines.length < 2) throw new Error('Empty sheet');
+      const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+      const idIdx = headers.indexOf('id');
+      const secsIdx = headers.indexOf('sleepsecs');
+      const scoreIdx = headers.indexOf('sleepscore');
+      if (idIdx < 0) throw new Error('id column missing');
+      const data = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',');
+        const date = (cols[idIdx] || '').replace(/"/g, '').trim();
+        const secs = parseFloat((cols[secsIdx] || '').replace(/"/g, '').trim());
+        const score = parseFloat((cols[scoreIdx] || '').replace(/"/g, '').trim());
+        if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+          const entry = { date };
+          if (secsIdx >= 0 && secs > 0 && !isNaN(secs)) entry.sleepHours = Math.round(secs / 360) / 10;
+          if (scoreIdx >= 0 && score > 0 && !isNaN(score)) entry.sleepScore = Math.round(score);
+          if (entry.sleepHours || entry.sleepScore) data.push(entry);
+        }
+      }
+      return data;
+    }
+
     // ─── CLOUD SYNC ────────────────────────────────────────────────────────
 
     function mergeCheckins(a, b) {
@@ -397,7 +428,7 @@
 
     // ─── DASHBOARD ─────────────────────────────────────────────────────────
 
-    function Dashboard({ checkins, hrvSheet }) {
+    function Dashboard({ checkins, hrvSheet, sleepSheet }) {
       const td = today();
       const todayCIs = dayCIs(checkins, td);
       const todayCI = todayCIs[todayCIs.length - 1] || null; // latest today
@@ -416,11 +447,11 @@
           const vals = window7.map(d => latestHRV(checkins, d, hrvSheet)).filter(Boolean);
           const hrv7 = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
           const latestToday = dayCIs(checkins, date).slice(-1)[0];
-          const sleepCIs = dayCIs(checkins, date).filter(c => c.sleepHours != null);
-          const sleep = sleepCIs.length ? sleepCIs[sleepCIs.length - 1].sleepHours : null;
+          const sleepEntry = sleepSheet.find(s => s.date === date);
+          const sleep = sleepEntry?.sleepHours ?? null;
           return { label: fmtShort(date), hrv, hrv7, stress: latestToday?.workStress ?? null, sleep };
         });
-      }, [checkins, hrvSheet, td]);
+      }, [checkins, hrvSheet, sleepSheet, td]);
 
       const painData = useMemo(() => {
         return Array.from({ length: 14 }, (_, i) => {
@@ -467,9 +498,16 @@
               color={todayCI?.painR > 5 ? C.crit : todayCI?.painR > 2 ? C.warn : C.right} animate />
             <MetricCard label="Work Stress" value={todayCI?.workStress} unit="/5"
               color={todayCI?.workStress >= 4 ? C.crit : todayCI?.workStress >= 3 ? C.warn : C.hrv} animate />
-            <MetricCard label="Sleep" value={todayCI?.sleepHours} unit="h"
-              sub={todayCI?.sleepQuality != null ? ['','Poor','Fair','OK','Good','Great'][todayCI.sleepQuality] : 'hours last night'}
-              color={todayCI?.sleepHours >= 7 ? C.hrv : todayCI?.sleepHours >= 6 ? C.warn : todayCI?.sleepHours != null ? C.crit : C.muted} animate />
+            {(() => {
+              const se = sleepSheet.find(s => s.date === td);
+              const sh = se?.sleepHours ?? null;
+              const sc = se?.sleepScore ?? null;
+              return (
+                <MetricCard label="Sleep" value={sh} unit="h"
+                  sub={sc != null ? `Score ${sc}/100` : 'from Garmin'}
+                  color={sh >= 7 ? C.hrv : sh >= 6 ? C.warn : sh != null ? C.crit : C.muted} animate />
+              );
+            })()}
             <div style={{
               background: C.surface, border: `2px solid ${recov.color}`,
               padding: '10px 18px', display: 'flex', flexDirection: 'column',
@@ -578,7 +616,7 @@
       );
 
       const sheetHRV = hrvSheet.find(h => h.date === selectedDate)?.hrv ?? null;
-      const emptyForm = () => ({ time: nowTime(), hrv: sheetHRV, hrvManual: false, workStress: null, sleepHours: null, sleepQuality: null, painR: 0, painL: 0, activityTypes: [], notes: '' });
+      const emptyForm = () => ({ time: nowTime(), hrv: sheetHRV, hrvManual: false, workStress: null, painR: 0, painL: 0, activityTypes: [], notes: '' });
 
       const [form, setForm] = useState(emptyForm);
 
@@ -702,46 +740,6 @@
                     <span style={{ fontSize: 9, fontFamily: SANS, color: C.textDim }}>{label}</span>
                   </button>
                 ))}
-              </div>
-            </div>
-
-            {/* Sleep */}
-            <div style={{ marginBottom: 14 }}>
-              <LabelRow>Sleep</LabelRow>
-              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                <div>
-                  <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, marginBottom: 4 }}>Hours</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <input type="number" min={0} max={16} step={0.5} value={form.sleepHours ?? ''}
-                      onChange={e => set('sleepHours', e.target.value ? Number(e.target.value) : null)}
-                      placeholder="—"
-                      style={{ background: C.surface2, border: `1px solid ${C.border2}`, color: C.text, fontFamily: MONO, fontSize: 22, padding: '6px 10px', width: 80, borderRadius: 6 }}
-                    />
-                    <span style={{ fontFamily: MONO, fontSize: 13, color: C.textDim }}>h</span>
-                    {form.sleepHours != null && (
-                      <span style={{ fontSize: 11, fontFamily: MONO, color: form.sleepHours >= 7 ? C.hrv : form.sleepHours >= 6 ? C.warn : C.crit }}>
-                        {form.sleepHours >= 7 ? '✓ Good' : form.sleepHours >= 6 ? '⚠ Low' : '▲ Poor'}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: C.textDim, fontFamily: SANS, marginBottom: 4 }}>Quality</div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {[[1,'😴','Poor'],[2,'😕','Fair'],[3,'😐','OK'],[4,'🙂','Good'],[5,'😊','Great']].map(([v, icon, label]) => (
-                      <button key={v} onClick={() => set('sleepQuality', form.sleepQuality === v ? null : v)} style={{
-                        background: form.sleepQuality === v ? C.surface3 : 'transparent',
-                        border: `1px solid ${form.sleepQuality === v ? C.hrv : C.border}`,
-                        color: C.text, padding: '7px 10px', cursor: 'pointer', borderRadius: 8,
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-                        opacity: form.sleepQuality && form.sleepQuality !== v ? 0.4 : 1,
-                      }}>
-                        <span style={{ fontSize: 20 }}>{icon}</span>
-                        <span style={{ fontSize: 9, fontFamily: SANS, color: C.textDim }}>{label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -1093,7 +1091,7 @@
 
     // ─── HISTORY ───────────────────────────────────────────────────────────
 
-    function History({ checkins }) {
+    function History({ checkins, sleepSheet = [] }) {
       const [sortDir, setSortDir] = useState('desc');
       const sorted = useMemo(() =>
         [...checkins].sort((a, b) => {
@@ -1105,19 +1103,22 @@
         [checkins, sortDir]
       );
       const exportCSV = () => {
-        const hdr = ['Date', 'Time', 'HRV', 'Stress', 'Sleep_h', 'Sleep_Q', 'Pain_R', 'Pain_L', 'Activities', 'Notes'];
-        const rows = sorted.map(c => [
-          c.date,
-          c.time ?? '',
-          c.hrv ?? '',
-          c.workStress ?? '',
-          c.sleepHours ?? '',
-          c.sleepQuality ?? '',
-          c.painR ?? '',
-          c.painL ?? '',
-          (c.activityTypes || (c.activityType ? [c.activityType] : [])).join(';'),
-          (c.notes ?? '').replace(/,/g, ';'),
-        ]);
+        const hdr = ['Date', 'Time', 'HRV', 'Stress', 'Sleep_h', 'Sleep_Score', 'Pain_R', 'Pain_L', 'Activities', 'Notes'];
+        const rows = sorted.map(c => {
+          const se = sleepSheet.find(s => s.date === c.date);
+          return [
+            c.date,
+            c.time ?? '',
+            c.hrv ?? '',
+            c.workStress ?? '',
+            se?.sleepHours ?? '',
+            se?.sleepScore ?? '',
+            c.painR ?? '',
+            c.painL ?? '',
+            (c.activityTypes || (c.activityType ? [c.activityType] : [])).join(';'),
+            (c.notes ?? '').replace(/,/g, ';'),
+          ];
+        });
         const csv = [hdr, ...rows].map(r => r.join(',')).join('\n');
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
@@ -1142,7 +1143,7 @@
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: MONO }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                    {['Date', 'Time', 'HRV ms', 'Stress', 'Sleep h', 'Sleep Q', 'Pain R', 'Pain L', 'Activities', 'Notes'].map(h => (
+                    {['Date', 'Time', 'HRV ms', 'Stress', 'Sleep h', 'Sleep Score', 'Pain R', 'Pain L', 'Activities', 'Notes'].map(h => (
                       <th key={h} style={{ padding: '8px 10px', color: C.textDim, fontFamily: SANS, fontSize: 10, textAlign: 'left', textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -1150,14 +1151,17 @@
                 <tbody>
                   {sorted.map((c, i) => {
                     const activities = c.activityTypes || (c.activityType ? [c.activityType] : []);
+                    const se = sleepSheet.find(s => s.date === c.date);
+                    const sh = se?.sleepHours ?? null;
+                    const sc = se?.sleepScore ?? null;
                     return (
                       <tr key={c.id || c.date + (c.time || '')} style={{ borderBottom: `1px solid ${C.border}`, background: i % 2 === 0 ? 'transparent' : C.surface3 + '44' }}>
                         <td style={{ padding: '8px 10px', color: C.textDim }}>{c.date}</td>
                         <td style={{ padding: '8px 10px', color: C.textDim }}>{c.time || '—'}</td>
                         <td style={{ padding: '8px 10px', color: c.hrv >= HRV_BASELINE ? C.hrv : c.hrv >= HRV_BASELINE * 0.8 ? C.warn : c.hrv ? C.crit : C.textDim }}>{c.hrv ?? '—'}</td>
                         <td style={{ padding: '8px 10px', color: c.workStress >= 4 ? C.crit : c.workStress >= 3 ? C.warn : C.text }}>{c.workStress ?? '—'}</td>
-                        <td style={{ padding: '8px 10px', color: c.sleepHours >= 7 ? C.hrv : c.sleepHours >= 6 ? C.warn : c.sleepHours != null ? C.crit : C.textDim }}>{c.sleepHours != null ? c.sleepHours + 'h' : '—'}</td>
-                        <td style={{ padding: '8px 10px', color: C.textDim }}>{c.sleepQuality != null ? ['','😴','😕','😐','🙂','😊'][c.sleepQuality] : '—'}</td>
+                        <td style={{ padding: '8px 10px', color: sh >= 7 ? C.hrv : sh >= 6 ? C.warn : sh != null ? C.crit : C.textDim }}>{sh != null ? sh + 'h' : '—'}</td>
+                        <td style={{ padding: '8px 10px', color: C.textDim }}>{sc != null ? sc : '—'}</td>
                         <td style={{ padding: '8px 10px', color: c.painR > 2 ? C.warn : C.right }}>{c.painR != null ? c.painR : '—'}</td>
                         <td style={{ padding: '8px 10px', color: c.painL > 2 ? C.warn : C.left }}>{c.painL != null ? c.painL : '—'}</td>
                         <td style={{ padding: '8px 10px', color: C.text }}>
@@ -1808,6 +1812,7 @@ function getOrCreate() {
       const [progression, setProgression] = useState(() => store.get('progression') || {});
       const [runProtocol, setRunProtocol] = useState(() => store.get('runProtocol') || { currentWeek: 1, sessions: [] });
       const [hrvSheet, setHrvSheet] = useState(() => store.get('hrvData') || []);
+      const [sleepSheet, setSleepSheet] = useState(() => store.get('sleepData') || []);
       const [syncState, setSyncState] = useState({ loading: false, lastSync: store.get('lastSync'), error: null });
       const [storageErr, setStorageErr] = useState(null);
       const [syncUrl, setSyncUrl] = useState(() => store.get('syncUrl') || '');
@@ -1828,10 +1833,12 @@ function getOrCreate() {
       const doSync = useCallback(async () => {
         setSyncState(s => ({ ...s, loading: true, error: null }));
         try {
-          const data = await syncHRV();
+          const [hrvData, sleepData] = await Promise.all([syncHRV(), syncSleep()]);
           const lastSync = new Date().toISOString();
-          setHrvSheet(data);
-          store.set('hrvData', data);
+          setHrvSheet(hrvData);
+          store.set('hrvData', hrvData);
+          setSleepSheet(sleepData);
+          store.set('sleepData', sleepData);
           store.set('lastSync', lastSync);
           setSyncState({ loading: false, lastSync, error: null });
         } catch (e) {
@@ -1968,11 +1975,11 @@ function getOrCreate() {
           </div>
 
           {/* Content */}
-          {activeTab === 'dashboard' && <Dashboard checkins={checkins} hrvSheet={hrvSheet} />}
+          {activeTab === 'dashboard' && <Dashboard checkins={checkins} hrvSheet={hrvSheet} sleepSheet={sleepSheet} />}
           {activeTab === 'checkin' && <CheckIn checkins={checkins} setCheckins={setCheckins} hrvSheet={hrvSheet} />}
           {activeTab === 'exercises' && <Exercises exerciseLog={exerciseLog} setExerciseLog={setExerciseLog} progression={progression} setProgression={setProgression} />}
           {activeTab === 'runprotocol' && <RunProtocol runProtocol={runProtocol} setRunProtocol={setRunProtocol} checkins={checkins} />}
-          {activeTab === 'history' && <History checkins={checkins} />}
+          {activeTab === 'history' && <History checkins={checkins} sleepSheet={sleepSheet} />}
           {activeTab === 'guide' && <ExerciseGuide />}
         </div>
       );
