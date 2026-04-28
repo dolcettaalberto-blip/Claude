@@ -247,6 +247,26 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return JSON.parse(await r.text());
     }
+    async function appendCheckinToSheet(url, entry, sleepEntry) {
+      if (!url) return;
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({
+            _action: 'appendCheckin',
+            date: entry.date, time: entry.time || '',
+            hrv: entry.hrv ?? '', workStress: entry.workStress ?? '',
+            feeling: entry.feeling ?? '', coffee: entry.coffee ?? 0, water: entry.water ?? 0,
+            painR: entry.painR ?? '', painL: entry.painL ?? '',
+            sleepHours: sleepEntry?.sleepHours ?? '', sleepScore: sleepEntry?.sleepScore ?? '',
+            activityTypes: entry.activityTypes || [], notes: entry.notes || '',
+          }),
+          redirect: 'follow',
+        });
+      } catch (e) { console.warn('appendCheckinToSheet:', e.message); }
+    }
+
     async function cloudPush(url, payload) {
       await fetch(url, {
         method: 'POST',
@@ -273,6 +293,9 @@
       ...ci,
       id: ci.id || `ci_${ci.date}_${idx}`,
       activityTypes: ci.activityTypes || (ci.activityType ? [ci.activityType] : []),
+      coffee: ci.coffee ?? 0,
+      water: ci.water ?? 0,
+      feeling: ci.feeling ?? null,
     });
 
     function recoveryStatus(checkins, hrvSheet) {
@@ -486,6 +509,21 @@
                   color={sh >= 7 ? C.hrv : sh >= 6 ? C.warn : sh != null ? C.crit : C.muted} animate />
               );
             })()}
+            {(() => {
+              const cis = dayCIs(checkins, td);
+              const totalCoffee = cis.reduce((s, c) => s + (c.coffee || 0), 0);
+              const totalWater = cis.reduce((s, c) => s + (c.water || 0), 0);
+              const latestFeeling = [...cis].reverse().find(c => c.feeling != null)?.feeling ?? null;
+              return (<>
+                <MetricCard label="Feeling" value={latestFeeling} unit="/10"
+                  sub={latestFeeling >= 8 ? '🌟 Great' : latestFeeling >= 6 ? '🙂 Good' : latestFeeling >= 4 ? '😐 OK' : latestFeeling != null ? '😕 Low' : 'today'}
+                  color={latestFeeling >= 7 ? C.hrv : latestFeeling >= 5 ? C.warn : latestFeeling != null ? C.crit : C.muted} animate />
+                <MetricCard label="Coffee" value={totalCoffee || null} unit="☕"
+                  sub="today" color={totalCoffee > 3 ? C.warn : C.textDim} animate />
+                <MetricCard label="Water" value={totalWater > 0 ? totalWater.toFixed(1) : null} unit="L"
+                  sub="today" color={totalWater >= 2 ? C.hrv : totalWater >= 1 ? C.warn : C.muted} animate />
+              </>);
+            })()}
             <div style={{
               background: C.surface, border: `2px solid ${recov.color}`,
               padding: '10px 18px', display: 'flex', flexDirection: 'column',
@@ -581,7 +619,7 @@
 
     // ─── CHECK-IN ──────────────────────────────────────────────────────────
 
-    function CheckIn({ checkins, setCheckins, hrvSheet }) {
+    function CheckIn({ checkins, setCheckins, hrvSheet, syncUrl, sleepSheet }) {
       const td = today();
       const nowTime = () => new Date().toTimeString().slice(0, 5);
 
@@ -594,7 +632,7 @@
       );
 
       const sheetHRV = hrvSheet.find(h => h.date === selectedDate)?.hrv ?? null;
-      const emptyForm = () => ({ time: nowTime(), hrv: sheetHRV, hrvManual: false, workStress: null, painR: 0, painL: 0, activityTypes: [], notes: '' });
+      const emptyForm = () => ({ time: nowTime(), hrv: sheetHRV, hrvManual: false, workStress: null, feeling: null, coffee: 0, water: 0, painR: 0, painL: 0, activityTypes: [], notes: '' });
 
       const [form, setForm] = useState(emptyForm);
 
@@ -619,6 +657,8 @@
         const updated = [...checkins.filter(c => c.id !== id), entry]
           .sort((a, b) => a.date !== b.date ? a.date.localeCompare(b.date) : (a.time || '').localeCompare(b.time || ''));
         setCheckins(updated); store.set('checkins', updated);
+        const sleepEntry = (sleepSheet || []).find(s => s.date === selectedDate);
+        appendCheckinToSheet(syncUrl, entry, sleepEntry);
         if (!editingId) startNew();
       };
 
@@ -659,7 +699,9 @@
                     <span style={{ fontFamily: MONO, fontSize: 11, color: ci.hrv >= HRV_BASELINE ? C.hrv : ci.hrv ? C.warn : C.muted, minWidth: 48 }}>{ci.hrv ? ci.hrv + 'ms' : '—'}</span>
                     <span style={{ fontSize: 11, fontFamily: MONO, color: (ci.painR ?? 0) > 2 ? C.warn : C.right }}>R:{ci.painR ?? '—'}</span>
                     <span style={{ fontSize: 11, fontFamily: MONO, color: (ci.painL ?? 0) > 2 ? C.warn : C.left }}>L:{ci.painL ?? '—'}</span>
-                    {ci.sleepHours != null && <span style={{ fontSize: 11, fontFamily: MONO, color: ci.sleepHours >= 7 ? C.hrv : ci.sleepHours >= 6 ? C.warn : C.crit }}>💤{ci.sleepHours}h</span>}
+                    {ci.feeling != null && <span style={{ fontSize: 11, fontFamily: MONO, color: ci.feeling >= 7 ? C.hrv : ci.feeling >= 5 ? C.warn : C.crit }}>🙂{ci.feeling}</span>}
+                    {ci.coffee > 0 && <span style={{ fontSize: 11, fontFamily: MONO, color: C.textDim }}>☕{ci.coffee}</span>}
+                    {ci.water > 0 && <span style={{ fontSize: 11, fontFamily: MONO, color: C.left }}>💧{ci.water}L</span>}
                     <span style={{ fontSize: 11, color: C.textDim, fontFamily: SANS, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{acts.join(', ') || '—'}</span>
                     {isEditing && <span style={{ fontSize: 10, color: C.left, fontFamily: MONO, fontWeight: 600 }}>editing</span>}
                   </div>
@@ -718,6 +760,63 @@
                     <span style={{ fontSize: 9, fontFamily: SANS, color: C.textDim }}>{label}</span>
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* General Feeling */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <LabelRow>General Feeling (1–10)</LabelRow>
+                {form.feeling != null && (
+                  <span style={{ fontSize: 11, fontFamily: MONO, color: form.feeling >= 7 ? C.hrv : form.feeling >= 5 ? C.warn : C.crit }}>
+                    {form.feeling >= 8 ? '🌟 Great' : form.feeling >= 6 ? '🙂 Good' : form.feeling >= 4 ? '😐 OK' : form.feeling >= 2 ? '😕 Low' : '😖 Rough'}
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <input type="range" min={1} max={10} value={form.feeling ?? 5}
+                  onChange={e => set('feeling', Number(e.target.value))}
+                  onMouseDown={() => { if (form.feeling == null) set('feeling', 5); }}
+                  onTouchStart={() => { if (form.feeling == null) set('feeling', 5); }}
+                  style={{ flex: 1, accentColor: form.feeling >= 7 ? C.hrv : form.feeling >= 5 ? C.warn : C.crit }} />
+                <div style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: (form.feeling >= 7 ? C.hrv : form.feeling >= 5 ? C.warn : form.feeling != null ? C.crit : C.muted) + '22',
+                  border: `2px solid ${form.feeling >= 7 ? C.hrv : form.feeling >= 5 ? C.warn : form.feeling != null ? C.crit : C.border}`,
+                  fontFamily: MONO, fontSize: 18, color: form.feeling >= 7 ? C.hrv : form.feeling >= 5 ? C.warn : form.feeling != null ? C.crit : C.textDim,
+                  borderRadius: 4 }}>{form.feeling ?? '—'}</div>
+                {form.feeling != null && <button onClick={() => set('feeling', null)} style={{ background: 'none', border: 'none', color: C.textDim, cursor: 'pointer', fontSize: 11, fontFamily: SANS }}>✕</button>}
+              </div>
+            </div>
+
+            {/* Coffee & Water */}
+            <div style={{ marginBottom: 14, display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              <div>
+                <LabelRow>Coffee</LabelRow>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button onClick={() => set('coffee', Math.max(0, (form.coffee || 0) - 1))}
+                    style={{ width: 32, height: 32, background: C.surface2, border: `1px solid ${C.border}`, color: C.textDim, cursor: 'pointer', borderRadius: 6, fontSize: 16, fontFamily: MONO }}>−</button>
+                  <button onClick={() => set('coffee', (form.coffee || 0) + 1)}
+                    style={{ background: C.surface2, border: `1px solid ${(form.coffee || 0) > 0 ? C.warn : C.border}`, color: C.text,
+                      padding: '6px 14px', cursor: 'pointer', borderRadius: 6, fontSize: 15, fontFamily: MONO, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    ☕ <span style={{ fontWeight: 600, color: (form.coffee || 0) > 0 ? C.warn : C.textDim }}>{form.coffee || 0}</span>
+                  </button>
+                  <button onClick={() => set('coffee', (form.coffee || 0) + 1)}
+                    style={{ width: 32, height: 32, background: C.surface2, border: `1px solid ${C.border}`, color: C.textDim, cursor: 'pointer', borderRadius: 6, fontSize: 16, fontFamily: MONO }}>+</button>
+                </div>
+              </div>
+              <div>
+                <LabelRow>Water</LabelRow>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button onClick={() => set('water', Math.max(0, Math.round(((form.water || 0) - 0.5) * 10) / 10))}
+                    style={{ width: 32, height: 32, background: C.surface2, border: `1px solid ${C.border}`, color: C.textDim, cursor: 'pointer', borderRadius: 6, fontSize: 16, fontFamily: MONO }}>−</button>
+                  <button onClick={() => set('water', Math.round(((form.water || 0) + 0.5) * 10) / 10)}
+                    style={{ background: C.surface2, border: `1px solid ${(form.water || 0) > 0 ? C.left : C.border}`, color: C.text,
+                      padding: '6px 14px', cursor: 'pointer', borderRadius: 6, fontSize: 15, fontFamily: MONO, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    💧 <span style={{ fontWeight: 600, color: (form.water || 0) > 0 ? C.left : C.textDim }}>{(form.water || 0).toFixed(1)}L</span>
+                  </button>
+                  <button onClick={() => set('water', Math.round(((form.water || 0) + 0.5) * 10) / 10)}
+                    style={{ width: 32, height: 32, background: C.surface2, border: `1px solid ${C.border}`, color: C.textDim, cursor: 'pointer', borderRadius: 6, fontSize: 16, fontFamily: MONO }}>+</button>
+                </div>
               </div>
             </div>
 
@@ -1081,18 +1180,14 @@
         [checkins, sortDir]
       );
       const exportCSV = () => {
-        const hdr = ['Date', 'Time', 'HRV', 'Stress', 'Sleep_h', 'Sleep_Score', 'Pain_R', 'Pain_L', 'Activities', 'Notes'];
+        const hdr = ['Date', 'Time', 'Feeling', 'HRV', 'Stress', 'Coffee', 'Water(L)', 'Sleep_h', 'Sleep_Score', 'Pain_R', 'Pain_L', 'Activities', 'Notes'];
         const rows = sorted.map(c => {
           const se = sleepSheet.find(s => s.date === c.date);
           return [
-            c.date,
-            c.time ?? '',
-            c.hrv ?? '',
-            c.workStress ?? '',
-            se?.sleepHours ?? '',
-            se?.sleepScore ?? '',
-            c.painR ?? '',
-            c.painL ?? '',
+            c.date, c.time ?? '', c.feeling ?? '', c.hrv ?? '', c.workStress ?? '',
+            c.coffee ?? '', c.water ?? '',
+            se?.sleepHours ?? '', se?.sleepScore ?? '',
+            c.painR ?? '', c.painL ?? '',
             (c.activityTypes || (c.activityType ? [c.activityType] : [])).join(';'),
             (c.notes ?? '').replace(/,/g, ';'),
           ];
@@ -1121,7 +1216,7 @@
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: MONO }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                    {['Date', 'Time', 'HRV ms', 'Stress', 'Sleep h', 'Sleep Score', 'Pain R', 'Pain L', 'Activities', 'Notes'].map(h => (
+                    {['Date', 'Time', 'Feeling', 'HRV ms', 'Stress', 'Coffee', 'Water L', 'Sleep h', 'Sleep Score', 'Pain R', 'Pain L', 'Activities', 'Notes'].map(h => (
                       <th key={h} style={{ padding: '8px 10px', color: C.textDim, fontFamily: SANS, fontSize: 10, textAlign: 'left', textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -1137,7 +1232,10 @@
                         <td style={{ padding: '8px 10px', color: C.textDim }}>{c.date}</td>
                         <td style={{ padding: '8px 10px', color: C.textDim }}>{c.time || '—'}</td>
                         <td style={{ padding: '8px 10px', color: c.hrv >= HRV_BASELINE ? C.hrv : c.hrv >= HRV_BASELINE * 0.8 ? C.warn : c.hrv ? C.crit : C.textDim }}>{c.hrv ?? '—'}</td>
+                        <td style={{ padding: '8px 10px', color: c.feeling >= 7 ? C.hrv : c.feeling >= 5 ? C.warn : c.feeling != null ? C.crit : C.textDim }}>{c.feeling ?? '—'}</td>
                         <td style={{ padding: '8px 10px', color: c.workStress >= 4 ? C.crit : c.workStress >= 3 ? C.warn : C.text }}>{c.workStress ?? '—'}</td>
+                        <td style={{ padding: '8px 10px', color: (c.coffee||0) > 3 ? C.warn : C.textDim }}>{c.coffee > 0 ? '☕×'+c.coffee : '—'}</td>
+                        <td style={{ padding: '8px 10px', color: (c.water||0) >= 2 ? C.hrv : (c.water||0) > 0 ? C.warn : C.textDim }}>{c.water > 0 ? c.water+'L' : '—'}</td>
                         <td style={{ padding: '8px 10px', color: sh >= 7 ? C.hrv : sh >= 6 ? C.warn : sh != null ? C.crit : C.textDim }}>{sh != null ? sh + 'h' : '—'}</td>
                         <td style={{ padding: '8px 10px', color: C.textDim }}>{sc != null ? sc : '—'}</td>
                         <td style={{ padding: '8px 10px', color: c.painR > 2 ? C.warn : C.right }}>{c.painR != null ? c.painR : '—'}</td>
@@ -1569,24 +1667,30 @@
     // ─── SYNC SETUP MODAL ─────────────────────────────────────────────────
 
     const APPS_SCRIPT_CODE = `function doGet(e) {
-  var sh = getOrCreate();
+  var sh = getOrCreate('AppSync');
   var v = sh.getRange('A1').getValue();
-  return ContentService
-    .createTextOutput(v || '{}')
-    .setMimeType(ContentService.MimeType.JSON);
+  return ContentService.createTextOutput(v || '{}').setMimeType(ContentService.MimeType.JSON);
 }
 function doPost(e) {
-  var sh = getOrCreate();
+  var data = JSON.parse(e.postData.contents);
+  if (data._action === 'appendCheckin') {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName('Health Checkin');
+    if (!sh) sh = ss.insertSheet('Health Checkin');
+    if (sh.getLastRow() === 0) {
+      sh.appendRow(['Date','Time','HRV','Stress','Feeling','Coffee','Water(L)','Pain R','Pain L','Sleep h','Sleep Score','Activities','Notes']);
+    }
+    sh.appendRow([data.date,data.time,data.hrv,data.workStress,data.feeling,data.coffee,data.water,data.painR,data.painL,data.sleepHours,data.sleepScore,(data.activityTypes||[]).join(', '),data.notes]);
+    return ContentService.createTextOutput('{"ok":true}').setMimeType(ContentService.MimeType.JSON);
+  }
+  var sh = getOrCreate('AppSync');
   sh.getRange('A1').setValue(e.postData.contents);
   sh.getRange('B1').setValue(new Date().toISOString());
-  return ContentService
-    .createTextOutput('{"ok":true}')
-    .setMimeType(ContentService.MimeType.JSON);
+  return ContentService.createTextOutput('{"ok":true}').setMimeType(ContentService.MimeType.JSON);
 }
-function getOrCreate() {
+function getOrCreate(name) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  return ss.getSheetByName('AppSync')
-    || ss.insertSheet('AppSync');
+  return ss.getSheetByName(name) || ss.insertSheet(name);
 }`;
 
     function SyncSetup({ syncUrl, onSave, onClose }) {
@@ -1954,7 +2058,7 @@ function getOrCreate() {
 
           {/* Content */}
           {activeTab === 'dashboard' && <Dashboard checkins={checkins} hrvSheet={hrvSheet} sleepSheet={sleepSheet} />}
-          {activeTab === 'checkin' && <CheckIn checkins={checkins} setCheckins={setCheckins} hrvSheet={hrvSheet} />}
+          {activeTab === 'checkin' && <CheckIn checkins={checkins} setCheckins={setCheckins} hrvSheet={hrvSheet} syncUrl={syncUrl} sleepSheet={sleepSheet} />}
           {activeTab === 'exercises' && <Exercises exerciseLog={exerciseLog} setExerciseLog={setExerciseLog} progression={progression} setProgression={setProgression} />}
           {activeTab === 'runprotocol' && <RunProtocol runProtocol={runProtocol} setRunProtocol={setRunProtocol} checkins={checkins} />}
           {activeTab === 'history' && <History checkins={checkins} sleepSheet={sleepSheet} />}
