@@ -265,7 +265,7 @@
             _action: 'appendCheckin',
             date: entry.date, time: entry.time || '',
             hrv: entry.hrv ?? '', workStress: entry.workStress ?? '',
-            feeling: entry.feeling ?? '', coffee: entry.coffee ?? 0, water: entry.water ?? 0,
+            feeling: entry.feeling ?? '', coffee: entry.coffee ?? 0,
             painR: entry.painR ?? '', painL: entry.painL ?? '',
             sleepHours: sleepEntry?.sleepHours ?? '', sleepScore: sleepEntry?.sleepScore ?? '',
             activityTypes: entry.activityTypes || [], notes: entry.notes || '',
@@ -302,7 +302,6 @@
       id: ci.id || `ci_${ci.date}_${idx}`,
       activityTypes: ci.activityTypes || (ci.activityType ? [ci.activityType] : []),
       coffee: ci.coffee ?? 0,
-      water: ci.water ?? 0,
       feeling: ci.feeling ?? null,
     });
 
@@ -520,7 +519,6 @@
             {(() => {
               const cis = dayCIs(checkins, td);
               const totalCoffee = cis.reduce((s, c) => s + (c.coffee || 0), 0);
-              const totalWater = cis.reduce((s, c) => s + (c.water || 0), 0);
               const latestFeeling = [...cis].reverse().find(c => c.feeling != null)?.feeling ?? null;
               return (<>
                 <MetricCard label="Feeling" value={latestFeeling} unit="/10"
@@ -528,8 +526,6 @@
                   color={latestFeeling >= 7 ? C.hrv : latestFeeling >= 5 ? C.warn : latestFeeling != null ? C.crit : C.muted} animate />
                 <MetricCard label="Coffee" value={totalCoffee || null} unit="☕"
                   sub="today" color={totalCoffee > 3 ? C.warn : C.textDim} animate />
-                <MetricCard label="Water" value={totalWater > 0 ? totalWater.toFixed(1) : null} unit="L"
-                  sub="today" color={totalWater >= 2 ? C.hrv : totalWater >= 1 ? C.warn : C.muted} animate />
                 {(() => {
                   const todayAl = (alcoholLog || []).filter(e => e.date === td);
                   const units = todayAl.reduce((s, e) => s + (e.units === '>1' ? 2 : 1), 0);
@@ -773,7 +769,6 @@
                     <span style={{ fontSize: 12, fontFamily: MONO, color: (ci.painL ?? 0) > 2 ? C.warn : C.left }}>L:{ci.painL ?? '—'}</span>
                     {ci.feeling != null && <span style={{ fontSize: 12, fontFamily: MONO, color: ci.feeling >= 7 ? C.hrv : ci.feeling >= 5 ? C.warn : C.crit }}>🙂{ci.feeling}</span>}
                     {ci.coffee > 0 && <span style={{ fontSize: 12, fontFamily: MONO, color: C.textDim }}>☕{ci.coffee}</span>}
-                    {ci.water > 0 && <span style={{ fontSize: 12, fontFamily: MONO, color: C.left }}>💧{ci.water}L</span>}
                     <span style={{ fontSize: 12, color: C.textDim, fontFamily: SANS, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{acts.join(', ') || '—'}</span>
                     {isEditing && <span style={{ fontSize: 11, color: C.left, fontFamily: MONO, fontWeight: 600 }}>✏</span>}
                   </div>
@@ -861,33 +856,18 @@
               </div>
             </div>
 
-            {/* Coffee & Water */}
-            <div style={{ marginBottom: 16, display: 'flex', gap: 12 }}>
-              <div style={{ flex: 1 }}>
-                <LabelRow>Coffee</LabelRow>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <button onClick={() => set('coffee', Math.max(0, (form.coffee || 0) - 1))}
-                    style={{ minWidth: 44, minHeight: 44, background: C.surface2, border: `1px solid ${C.border}`, color: C.textDim, cursor: 'pointer', borderRadius: 8, fontSize: 18 }}>−</button>
-                  <div style={{ flex: 1, textAlign: 'center', background: C.surface2, border: `1px solid ${(form.coffee || 0) > 0 ? C.warn : C.border}`,
-                    borderRadius: 8, padding: '10px 0', fontSize: 16, fontFamily: MONO, fontWeight: 600, color: (form.coffee || 0) > 0 ? C.warn : C.textDim }}>
-                    ☕ {form.coffee || 0}
-                  </div>
-                  <button onClick={() => set('coffee', (form.coffee || 0) + 1)}
-                    style={{ minWidth: 44, minHeight: 44, background: C.surface2, border: `1px solid ${C.border}`, color: C.textDim, cursor: 'pointer', borderRadius: 8, fontSize: 18 }}>+</button>
+            {/* Coffee */}
+            <div style={{ marginBottom: 16 }}>
+              <LabelRow>Coffee</LabelRow>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button onClick={() => set('coffee', Math.max(0, (form.coffee || 0) - 1))}
+                  style={{ minWidth: 44, minHeight: 44, background: C.surface2, border: `1px solid ${C.border}`, color: C.textDim, cursor: 'pointer', borderRadius: 8, fontSize: 18 }}>−</button>
+                <div style={{ flex: 1, textAlign: 'center', background: C.surface2, border: `1px solid ${(form.coffee || 0) > 0 ? C.warn : C.border}`,
+                  borderRadius: 8, padding: '10px 0', fontSize: 16, fontFamily: MONO, fontWeight: 600, color: (form.coffee || 0) > 0 ? C.warn : C.textDim }}>
+                  ☕ {form.coffee || 0}
                 </div>
-              </div>
-              <div style={{ flex: 1 }}>
-                <LabelRow>Water</LabelRow>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <button onClick={() => set('water', Math.max(0, Math.round(((form.water || 0) - 0.5) * 10) / 10))}
-                    style={{ minWidth: 44, minHeight: 44, background: C.surface2, border: `1px solid ${C.border}`, color: C.textDim, cursor: 'pointer', borderRadius: 8, fontSize: 18 }}>−</button>
-                  <div style={{ flex: 1, textAlign: 'center', background: C.surface2, border: `1px solid ${(form.water || 0) > 0 ? C.left : C.border}`,
-                    borderRadius: 8, padding: '10px 0', fontSize: 16, fontFamily: MONO, fontWeight: 600, color: (form.water || 0) > 0 ? C.left : C.textDim }}>
-                    💧 {(form.water || 0).toFixed(1)}L
-                  </div>
-                  <button onClick={() => set('water', Math.round(((form.water || 0) + 0.5) * 10) / 10)}
-                    style={{ minWidth: 44, minHeight: 44, background: C.surface2, border: `1px solid ${C.border}`, color: C.textDim, cursor: 'pointer', borderRadius: 8, fontSize: 18 }}>+</button>
-                </div>
+                <button onClick={() => set('coffee', (form.coffee || 0) + 1)}
+                  style={{ minWidth: 44, minHeight: 44, background: C.surface2, border: `1px solid ${C.border}`, color: C.textDim, cursor: 'pointer', borderRadius: 8, fontSize: 18 }}>+</button>
               </div>
             </div>
 
@@ -1260,15 +1240,15 @@
         return m;
       }, [alcoholLog]);
       const exportCSV = () => {
-        const hdr = ['Date', 'Time', 'Feeling', 'HRV', 'Stress', 'Coffee', 'Water(L)', 'Sleep_h', 'Sleep_Score', 'Pain_R', 'Pain_L', 'Alcohol_units', 'Activities', 'Notes'];
+        const hdr = ['Date', 'Time', 'HRV', 'Feeling', 'Stress', 'Coffee', 'Sleep_h', 'Sleep_Score', 'Pain_L', 'Pain_R', 'Alcohol_units', 'Activities', 'Notes'];
         const rows = sorted.map(c => {
           const se = sleepSheet.find(s => s.date === c.date);
           const al = alcoholByDate[c.date];
           return [
-            c.date, c.time ?? '', c.feeling ?? '', c.hrv ?? '', c.workStress ?? '',
-            c.coffee ?? '', c.water ?? '',
+            c.date, c.time ?? '', c.hrv ?? '', c.feeling ?? '', c.workStress ?? '',
+            c.coffee ?? '',
             se?.sleepHours ?? '', se?.sleepScore ?? '',
-            c.painR ?? '', c.painL ?? '',
+            c.painL ?? '', c.painR ?? '',
             al ? al.units + '+' : '',
             (c.activityTypes || (c.activityType ? [c.activityType] : [])).join(';'),
             (c.notes ?? '').replace(/,/g, ';'),
@@ -1298,7 +1278,7 @@
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: MONO }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                    {['Date', 'Time', 'Feeling', 'HRV ms', 'Stress', 'Coffee', 'Water L', 'Sleep h', 'Sleep Score', 'Pain R', 'Pain L', 'Alcohol', 'Activities', 'Notes'].map(h => (
+                    {['Date', 'Time', 'HRV ms', 'Feeling', 'Stress', 'Coffee', 'Sleep h', 'Sleep Score', 'Pain L ←', 'Pain R →', 'Alcohol', 'Activities', 'Notes'].map(h => (
                       <th key={h} style={{ padding: '8px 10px', color: C.textDim, fontFamily: SANS, fontSize: 10, textAlign: 'left', textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -1318,11 +1298,10 @@
                         <td style={{ padding: '8px 10px', color: c.feeling >= 7 ? C.hrv : c.feeling >= 5 ? C.warn : c.feeling != null ? C.crit : C.textDim }}>{c.feeling ?? '—'}</td>
                         <td style={{ padding: '8px 10px', color: c.workStress >= 4 ? C.crit : c.workStress >= 3 ? C.warn : C.text }}>{c.workStress ?? '—'}</td>
                         <td style={{ padding: '8px 10px', color: (c.coffee||0) > 3 ? C.warn : C.textDim }}>{c.coffee > 0 ? '☕×'+c.coffee : '—'}</td>
-                        <td style={{ padding: '8px 10px', color: (c.water||0) >= 2 ? C.hrv : (c.water||0) > 0 ? C.warn : C.textDim }}>{c.water > 0 ? c.water+'L' : '—'}</td>
                         <td style={{ padding: '8px 10px', color: sh >= 7 ? C.hrv : sh >= 6 ? C.warn : sh != null ? C.crit : C.textDim }}>{sh != null ? sh + 'h' : '—'}</td>
                         <td style={{ padding: '8px 10px', color: C.textDim }}>{sc != null ? sc : '—'}</td>
-                        <td style={{ padding: '8px 10px', color: c.painR > 2 ? C.warn : C.right }}>{c.painR != null ? c.painR : '—'}</td>
-                        <td style={{ padding: '8px 10px', color: c.painL > 2 ? C.warn : C.left }}>{c.painL != null ? c.painL : '—'}</td>
+                        <td style={{ padding: '8px 10px', color: c.painL > 5 ? C.crit : c.painL > 2 ? C.warn : c.painL != null ? C.left : C.textDim }}>{c.painL != null ? c.painL : '—'}</td>
+                        <td style={{ padding: '8px 10px', color: c.painR > 5 ? C.crit : c.painR > 2 ? C.warn : c.painR != null ? C.right : C.textDim }}>{c.painR != null ? c.painR : '—'}</td>
                         <td style={{ padding: '8px 10px', color: al ? (al.units > 2 ? C.crit : C.warn) : C.textDim }}>
                           {al ? `🍷 ${al.units}+ u` : '—'}
                         </td>
