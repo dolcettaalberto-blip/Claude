@@ -2017,12 +2017,11 @@ function getOrCreate(name) {
 
       useEffect(() => { doSync(); }, []);
 
-      // Pull from cloud on mount / when URL changes
-      useEffect(() => {
-        if (!syncUrl) { isMounting.current = false; return; }
-        const local = { checkins, exerciseLog, progression, runProtocol, alcoholLog };
+      // Reusable pull-merge-push function
+      const doPullSync = useCallback((url, local) => {
+        if (!url) return Promise.resolve();
         setCloudState(s => ({ ...s, syncing: true, error: null }));
-        cloudPull(syncUrl)
+        return cloudPull(url)
           .then(cloud => {
             const merged = mergeAppData(local, cloud);
             setCheckins(merged.checkins);       store.set('checkins', merged.checkins);
@@ -2030,16 +2029,35 @@ function getOrCreate(name) {
             setProgression(merged.progression); store.set('progression', merged.progression);
             setRunProtocol(merged.runProtocol); store.set('runProtocol', merged.runProtocol);
             if (merged.alcoholLog) { setAlcoholLog(merged.alcoholLog); store.set('alcoholLog', merged.alcoholLog); }
-            return cloudPush(syncUrl, merged);
+            return cloudPush(url, merged);
           })
           .then(() => {
             const ts = new Date().toISOString();
             store.set('cloudLastSync', ts);
             setCloudState({ syncing: false, lastSync: ts, error: null });
           })
-          .catch(e => setCloudState(s => ({ ...s, syncing: false, error: e.message })))
-          .finally(() => { isMounting.current = false; });
+          .catch(e => setCloudState(s => ({ ...s, syncing: false, error: e.message })));
+      }, []); // eslint-disable-line
+
+      // Pull from cloud on mount / when URL changes
+      useEffect(() => {
+        if (!syncUrl) { isMounting.current = false; return; }
+        const local = { checkins, exerciseLog, progression, runProtocol, alcoholLog };
+        doPullSync(syncUrl, local).finally(() => { isMounting.current = false; });
       }, [syncUrl]); // eslint-disable-line
+
+      // Pull when tab becomes visible again (switching back from phone → mac)
+      useEffect(() => {
+        if (!syncUrl) return;
+        const onVisible = () => {
+          if (document.visibilityState === 'visible') {
+            const local = { checkins, exerciseLog, progression, runProtocol, alcoholLog };
+            doPullSync(syncUrl, local);
+          }
+        };
+        document.addEventListener('visibilitychange', onVisible);
+        return () => document.removeEventListener('visibilitychange', onVisible);
+      }, [syncUrl, checkins, exerciseLog, progression, runProtocol, alcoholLog]); // eslint-disable-line
 
       // Auto-push 2 s after any data change
       useEffect(() => {
@@ -2107,6 +2125,13 @@ function getOrCreate(name) {
                     ? <span style={{ fontSize:10, color:C.hrv, fontFamily:MONO }}>☁ {fmtTime(cloudState.lastSync)}</span>
                     : <span style={{ fontSize:10, color:C.muted, fontFamily:MONO }}>☁ not set up</span>
                   }
+                  {syncUrl && !cloudState.syncing && (
+                    <button onClick={() => doPullSync(syncUrl, { checkins, exerciseLog, progression, runProtocol, alcoholLog })} style={{
+                      background: 'transparent', border: `1px solid ${C.border}`,
+                      color: C.textDim, padding: '4px 8px', fontSize: 10, fontFamily: MONO,
+                      cursor: 'pointer', borderRadius: 4
+                    }}>↓ Pull</button>
+                  )}
                   <button onClick={() => setShowSyncSetup(true)} style={{
                     background: syncUrl ? C.left+'15' : C.surface3, border:`1px solid ${syncUrl ? C.left+'50' : C.border}`,
                     color: syncUrl ? C.left : C.textDim, padding:'4px 10px', fontSize:11,
