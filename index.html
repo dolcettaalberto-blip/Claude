@@ -166,7 +166,16 @@
 
     const GARMIN_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQRo0q5gSheb-e2_Jo-s7y6uIf8mcZcEzyjET61oGfDJ_2bybXh0o8FDErqNrysEMCM3fYu2KfGHyzD/pub?gid=1605637632&single=true&output=csv';
 
-    async function syncGarmin() {
+    async function syncGarmin(appsScriptUrl) {
+      // Prefer Apps Script (reads sheet directly, no cache) over public CSV
+      if (appsScriptUrl) {
+        const resp = await fetch(appsScriptUrl + '?_action=getGarmin&_=' + Date.now(), { redirect: 'follow' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const json = await resp.json();
+        if (json.error) throw new Error(json.error);
+        return { hrvData: json.hrvData || [], sleepData: json.sleepData || [] };
+      }
+      // Fallback: public CSV (may be cached up to ~1h by Google)
       const resp = await fetch(GARMIN_URL + '&_=' + Date.now(), { credentials: 'omit', cache: 'no-store' });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const csv = await resp.text();
@@ -1732,9 +1741,40 @@
     // ─── SYNC SETUP MODAL ─────────────────────────────────────────────────
 
     const APPS_SCRIPT_CODE = `function doGet(e) {
+  if (e && e.parameter && e.parameter._action === 'getGarmin') {
+    return getGarminData();
+  }
   var sh = getOrCreate('AppSync');
   var v = sh.getRange('A1').getValue();
   return ContentService.createTextOutput(v || '{}').setMimeType(ContentService.MimeType.JSON);
+}
+function getGarminData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('Wellness & Garmin');
+  if (!sh) return ContentService.createTextOutput('{"error":"sheet not found"}').setMimeType(ContentService.MimeType.JSON);
+  var rows = sh.getDataRange().getValues();
+  if (rows.length < 2) return ContentService.createTextOutput('{"hrvData":[],"sleepData":[]}').setMimeType(ContentService.MimeType.JSON);
+  var headers = rows[0].map(function(h){ return String(h).toLowerCase().trim(); });
+  var idIdx = headers.indexOf('id');
+  var hrvIdx = headers.indexOf('hrv');
+  var secsIdx = headers.indexOf('sleepsecs');
+  var scoreIdx = headers.indexOf('sleepscore');
+  var hrvData = [], sleepData = [];
+  for (var i = 1; i < rows.length; i++) {
+    var row = rows[i];
+    var date = String(row[idIdx] || '').trim();
+    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) continue;
+    var hrv = parseFloat(row[hrvIdx]);
+    var secs = parseFloat(row[secsIdx]);
+    var score = parseFloat(row[scoreIdx]);
+    if (hrvIdx >= 0 && hrv > 0 && !isNaN(hrv)) hrvData.push({date: date, hrv: Math.round(hrv)});
+    if (secs > 0 && !isNaN(secs)) {
+      var entry = {date: date, sleepHours: Math.round(secs / 360) / 10};
+      if (score > 0 && !isNaN(score)) entry.sleepScore = Math.round(score);
+      sleepData.push(entry);
+    }
+  }
+  return ContentService.createTextOutput(JSON.stringify({hrvData: hrvData, sleepData: sleepData})).setMimeType(ContentService.MimeType.JSON);
 }
 function doPost(e) {
   var data = JSON.parse(e.postData.contents);
@@ -1743,9 +1783,9 @@ function doPost(e) {
     var sh = ss.getSheetByName('Health Checkin');
     if (!sh) sh = ss.insertSheet('Health Checkin');
     if (sh.getLastRow() === 0) {
-      sh.appendRow(['Date','Time','HRV','Stress','Feeling','Coffee','Water(L)','Pain R','Pain L','Sleep h','Sleep Score','Activities','Notes']);
+      sh.appendRow(['Date','Time','HRV','Stress','Feeling','Coffee','Pain R','Pain L','Sleep h','Sleep Score','Activities','Notes']);
     }
-    sh.appendRow([data.date,data.time,data.hrv,data.workStress,data.feeling,data.coffee,data.water,data.painR,data.painL,data.sleepHours,data.sleepScore,(data.activityTypes||[]).join(', '),data.notes]);
+    sh.appendRow([data.date,data.time,data.hrv,data.workStress,data.feeling,data.coffee,data.painR,data.painL,data.sleepHours,data.sleepScore,(data.activityTypes||[]).join(', '),data.notes]);
     return ContentService.createTextOutput('{"ok":true}').setMimeType(ContentService.MimeType.JSON);
   }
   var sh = getOrCreate('AppSync');
@@ -1981,7 +2021,7 @@ function getOrCreate(name) {
       const doSync = useCallback(async () => {
         setSyncState(s => ({ ...s, loading: true, error: null }));
         try {
-          const { hrvData, sleepData } = await syncGarmin();
+          const { hrvData, sleepData } = await syncGarmin(latestSyncUrl.current);
           const lastSync = new Date().toISOString();
           setHrvSheet(hrvData);
           store.set('hrvData', hrvData);
