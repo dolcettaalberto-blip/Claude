@@ -2035,14 +2035,23 @@ function getOrCreate(name) {
 
       // Poll every 30 s + pull on tab focus — both use the ref so no stale closures
       useEffect(() => {
-        const pull = () => {
+        const pullCloud = () => {
           const url = latestSyncUrl.current;
           if (!url || document.visibilityState !== 'visible') return;
           doPullSync(url, latestData.current);
         };
-        const interval = setInterval(pull, 30000);
-        document.addEventListener('visibilitychange', pull);
-        return () => { clearInterval(interval); document.removeEventListener('visibilitychange', pull); };
+        const pullAll = () => {
+          pullCloud();
+          if (document.visibilityState === 'visible') doSync();
+        };
+        const cloudInterval = setInterval(pullCloud, 30000);
+        const garminInterval = setInterval(() => { if (document.visibilityState === 'visible') doSync(); }, 300000); // every 5 min
+        document.addEventListener('visibilitychange', pullAll);
+        return () => {
+          clearInterval(cloudInterval);
+          clearInterval(garminInterval);
+          document.removeEventListener('visibilitychange', pullAll);
+        };
       }, []); // eslint-disable-line
 
       // Auto-push 2 s after any data change
