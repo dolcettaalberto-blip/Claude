@@ -98,13 +98,18 @@
     const GARMIN_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQRo0q5gSheb-e2_Jo-s7y6uIf8mcZcEzyjET61oGfDJ_2bybXh0o8FDErqNrysEMCM3fYu2KfGHyzD/pub?gid=1605637632&single=true&output=csv';
 
     async function syncGarmin(appsScriptUrl) {
-      // Prefer Apps Script (reads sheet directly, no cache) over public CSV
+      // Try Apps Script first (reads sheet directly, no cache) — only if redeployed with getGarmin support
       if (appsScriptUrl) {
-        const resp = await fetch(appsScriptUrl + '?_action=getGarmin&_=' + Date.now(), { redirect: 'follow' });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const json = await resp.json();
-        if (json.error) throw new Error(json.error);
-        return { hrvData: json.hrvData || [], sleepData: json.sleepData || [] };
+        try {
+          const resp = await fetch(appsScriptUrl + '?_action=getGarmin&_=' + Date.now(), { redirect: 'follow' });
+          if (resp.ok) {
+            const json = await resp.json();
+            // Validate it's actually Garmin data (not the AppSync blob from old script)
+            if (Array.isArray(json.hrvData) && Array.isArray(json.sleepData) && json.hrvData.length + json.sleepData.length > 0) {
+              return { hrvData: json.hrvData, sleepData: json.sleepData };
+            }
+          }
+        } catch (e) { /* fall through to CSV */ }
       }
       // Fallback: public CSV (may be cached up to ~1h by Google)
       const resp = await fetch(GARMIN_URL + '&_=' + Date.now(), { credentials: 'omit', cache: 'no-store' });
