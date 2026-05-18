@@ -573,7 +573,7 @@
 
     // ─── CHECK-IN ──────────────────────────────────────────────────────────
 
-    function CheckIn({ checkins, setCheckins, hrvSheet, syncUrl, sleepSheet, alcoholLog, setAlcoholLog }) {
+    function CheckIn({ checkins, setCheckins, hrvSheet, syncUrl, sleepSheet, alcoholLog, setAlcoholLog, editTarget, clearEditTarget }) {
       const td = today();
       const nowTime = () => new Date().toTimeString().slice(0, 5);
 
@@ -591,6 +591,15 @@
       const [form, setForm] = useState(emptyForm);
 
       useEffect(() => { setForm(emptyForm()); setEditingId(null); }, [selectedDate]); // eslint-disable-line
+
+      // Trigger edit from History tab
+      useEffect(() => {
+        if (!editTarget) return;
+        setSelectedDate(editTarget.date);
+        setEditingId(editTarget.id);
+        setForm({ ...normaliseCI(editTarget, 0) });
+        clearEditTarget();
+      }, [editTarget]); // eslint-disable-line
 
       const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
       const toggleActivity = (type) => {
@@ -1029,7 +1038,7 @@
 
     // ─── HISTORY ───────────────────────────────────────────────────────────
 
-    function History({ checkins, sleepSheet = [], alcoholLog = [] }) {
+    function History({ checkins, sleepSheet = [], alcoholLog = [], onEdit }) {
       const [sortDir, setSortDir] = useState('desc');
       const sorted = useMemo(() =>
         [...checkins].sort((a, b) => {
@@ -1088,7 +1097,7 @@
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: MONO }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                    {['Date', 'Time', 'HRV ms', 'Feeling', 'Stress', 'Coffee', 'Sleep h', 'Sleep Score', 'Pain L ←', 'Pain R →', 'Alcohol', 'Activities', 'Notes'].map(h => (
+                    {['', 'Date', 'Time', 'HRV ms', 'Feeling', 'Stress', 'Coffee', 'Sleep h', 'Sleep Score', 'Pain L ←', 'Pain R →', 'Alcohol', 'Activities', 'Notes'].map(h => (
                       <th key={h} style={{ padding: '8px 10px', color: C.textDim, fontFamily: SANS, fontSize: 10, textAlign: 'left', textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -1102,6 +1111,9 @@
                     const al = alcoholByDate[c.date];
                     return (
                       <tr key={c.id || c.date + (c.time || '')} style={{ borderBottom: `1px solid ${C.border}`, background: i % 2 === 0 ? 'transparent' : C.surface3 + '44' }}>
+                        <td style={{ padding: '4px 6px' }}>
+                          <button onClick={() => onEdit && onEdit(c)} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: 5, cursor: 'pointer', color: C.left, fontSize: 12, padding: '3px 7px', fontFamily: MONO, whiteSpace: 'nowrap' }}>✏ Edit</button>
+                        </td>
                         <td style={{ padding: '8px 10px', color: C.textDim }}>{c.date}</td>
                         <td style={{ padding: '8px 10px', color: C.textDim }}>{c.time || '—'}</td>
                         <td style={{ padding: '8px 10px', color: c.hrv >= HRV_BASELINE ? C.hrv : c.hrv >= HRV_BASELINE * 0.8 ? C.warn : c.hrv ? C.crit : C.textDim }}>{c.hrv ?? '—'}</td>
@@ -1140,6 +1152,8 @@
 
     function App() {
       const [activeTab, setActiveTab] = useState('dashboard');
+      const [editTarget, setEditTarget] = useState(null);
+      const handleEditCheckin = (ci) => { setEditTarget(ci); setActiveTab('checkin'); };
       const [checkins, setCheckins] = useState(() => {
         const raw = store.get('checkins') || [];
         return raw.map((ci, i) => normaliseCI(ci, i));
@@ -1348,9 +1362,9 @@
 
           {/* Content */}
           {activeTab === 'dashboard' && <Dashboard checkins={checkins} hrvSheet={hrvSheet} sleepSheet={sleepSheet} alcoholLog={alcoholLog} />}
-          {activeTab === 'checkin' && <CheckIn checkins={checkins} setCheckins={setCheckins} hrvSheet={hrvSheet} syncUrl={syncUrl} sleepSheet={sleepSheet} alcoholLog={alcoholLog} setAlcoholLog={setAlcoholLog} />}
+          {activeTab === 'checkin' && <CheckIn checkins={checkins} setCheckins={setCheckins} hrvSheet={hrvSheet} syncUrl={syncUrl} sleepSheet={sleepSheet} alcoholLog={alcoholLog} setAlcoholLog={setAlcoholLog} editTarget={editTarget} clearEditTarget={() => setEditTarget(null)} />}
           {activeTab === 'runprotocol' && <RunProtocol runProtocol={runProtocol} setRunProtocol={setRunProtocol} checkins={checkins} />}
-          {activeTab === 'history' && <History checkins={checkins} sleepSheet={sleepSheet} alcoholLog={alcoholLog} />}
+          {activeTab === 'history' && <History checkins={checkins} sleepSheet={sleepSheet} alcoholLog={alcoholLog} onEdit={handleEditCheckin} />}
         </div>
       );
     }
