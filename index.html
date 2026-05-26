@@ -101,7 +101,7 @@
       // Try Apps Script first — returns hrv, sleep + activities in one call
       if (appsScriptUrl) {
         try {
-          const resp = await fetch(appsScriptUrl + '?_action=getGarmin&_=' + Date.now(), { redirect: 'follow' });
+          const resp = await fetch(appsScriptUrl + '?action=getGarmin&t=' + Date.now(), { redirect: 'follow' });
           if (resp.ok) {
             const json = await resp.json();
             if (Array.isArray(json.hrvData) && Array.isArray(json.sleepData) && json.hrvData.length + json.sleepData.length > 0) {
@@ -1155,7 +1155,7 @@
     // ─── SYNC SETUP ────────────────────────────────────────────────────────
 
     const APPS_SCRIPT_CODE = `function doGet(e) {
-  if (e && e.parameter && e.parameter._action === 'getGarmin') {
+  if (e && e.parameter && e.parameter.action === 'getGarmin') {
     return getHealthData();
   }
   var sh = getOrCreate('AppSync');
