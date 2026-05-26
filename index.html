@@ -98,20 +98,19 @@
     const GARMIN_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQRo0q5gSheb-e2_Jo-s7y6uIf8mcZcEzyjET61oGfDJ_2bybXh0o8FDErqNrysEMCM3fYu2KfGHyzD/pub?gid=1605637632&single=true&output=csv';
 
     async function syncGarmin(appsScriptUrl) {
-      // Try Apps Script first (reads sheet directly, no cache) — only if redeployed with getGarmin support
+      // Try Apps Script first — returns hrv, sleep + activities in one call
       if (appsScriptUrl) {
         try {
           const resp = await fetch(appsScriptUrl + '?_action=getGarmin&_=' + Date.now(), { redirect: 'follow' });
           if (resp.ok) {
             const json = await resp.json();
-            // Validate it's actually Garmin data (not the AppSync blob from old script)
             if (Array.isArray(json.hrvData) && Array.isArray(json.sleepData) && json.hrvData.length + json.sleepData.length > 0) {
-              return { hrvData: json.hrvData, sleepData: json.sleepData };
+              return { hrvData: json.hrvData, sleepData: json.sleepData, activitiesData: json.activitiesData || [] };
             }
           }
         } catch (e) { /* fall through to CSV */ }
       }
-      // Fallback: public CSV (may be cached up to ~1h by Google)
+      // Fallback: public CSV (no activities data available)
       const resp = await fetch(GARMIN_URL + '&_=' + Date.now(), { credentials: 'omit', cache: 'no-store' });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const csv = await resp.text();
@@ -131,14 +130,14 @@
         const hrv   = parseFloat((cols[hrvIdx]   || '').replace(/"/g, '').trim());
         const secs  = parseFloat((cols[secsIdx]  || '').replace(/"/g, '').trim());
         const score = parseFloat((cols[scoreIdx] || '').replace(/"/g, '').trim());
-        if (hrvIdx  >= 0 && hrv  > 0 && !isNaN(hrv))  hrvData.push({ date, hrv: Math.round(hrv) });
+        if (hrvIdx >= 0 && hrv > 0 && !isNaN(hrv)) hrvData.push({ date, hrv: Math.round(hrv) });
         if (secs > 0 && !isNaN(secs)) {
           const entry = { date, sleepHours: Math.round(secs / 360) / 10 };
           if (score > 0 && !isNaN(score)) entry.sleepScore = Math.round(score);
           sleepData.push(entry);
         }
       }
-      return { hrvData, sleepData };
+      return { hrvData, sleepData, activitiesData: [] };
     }
 
     // ─── CLOUD SYNC ────────────────────────────────────────────────────────
@@ -360,7 +359,7 @@
 
     // ─── DASHBOARD ─────────────────────────────────────────────────────────
 
-    function Dashboard({ checkins, hrvSheet, sleepSheet, alcoholLog }) {
+    function Dashboard({ checkins, hrvSheet, sleepSheet, alcoholLog, activitiesSheet = [] }) {
       const td = today();
       const todayCIs = dayCIs(checkins, td);
       const todayCI = todayCIs[todayCIs.length - 1] || null; // latest today
@@ -394,22 +393,28 @@
         });
       }, [checkins, td]);
 
+      const RUN_TYPES = ['Run','VirtualRun','TrailRun'];
       const weekLoad = useMemo(() => {
         const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
         return Array.from({ length: 7 }, (_, i) => {
           const date = addDays(td, -6 + i);
-          const cis = dayCIs(checkins, date);
-          const acts = cis.flatMap(ci => ci.activityTypes || (ci.activityType ? [ci.activityType] : []));
           const d = new Date(date + 'T12:00:00');
+          // From Garmin/intervals.icu activities sheet
+          const dayActs = activitiesSheet.filter(a => a.date === date);
+          const hasRun = dayActs.some(a => RUN_TYPES.includes(a.type));
+          const hasWorkout = dayActs.some(a => !RUN_TYPES.includes(a.type));
+          // Manual entries from check-in (Physio, Rest)
+          const cis = dayCIs(checkins, date);
+          const manualActs = cis.flatMap(ci => ci.activityTypes || []);
+          const hasPhysio = manualActs.includes('Physio session');
           return {
             label: dayNames[d.getDay()],
-            Run: acts.includes('Run') ? 1 : 0,
-            Cross: acts.includes('Cross-train') ? 1 : 0,
-            Physio: acts.includes('Physio session') ? 1 : 0,
-            Rest: acts.includes('Rest') ? 1 : 0,
+            Run: hasRun ? 1 : 0,
+            Workout: hasWorkout ? 1 : 0,
+            Physio: hasPhysio ? 1 : 0,
           };
         });
-      }, [checkins, td]);
+      }, [checkins, activitiesSheet, td]);
 
       const hrvColor = todayHRV == null ? C.muted
         : todayHRV >= HRV_BASELINE * 0.95 ? C.hrv
@@ -539,13 +544,12 @@
                 <YAxis allowDecimals={false} domain={[0, 4]} tick={{ fontSize: 9, fill: C.textDim, fontFamily: MONO }} width={25} />
                 <Tooltip content={<Tip />} />
                 <Bar dataKey="Run" name="Run" stackId="a" fill={C.hrv} radius={0} />
-                <Bar dataKey="Cross" name="Cross-train" stackId="a" fill={C.left} radius={0} />
-                <Bar dataKey="Physio" name="Physio" stackId="a" fill={C.warn} radius={0} />
-                <Bar dataKey="Rest" name="Rest" stackId="a" fill={C.muted} radius={[4,4,0,0]} />
+                <Bar dataKey="Workout" name="Workout" stackId="a" fill={C.left} radius={0} />
+                <Bar dataKey="Physio" name="Physio" stackId="a" fill={C.warn} radius={[4,4,0,0]} />
               </BarChart>
             </ResponsiveContainer>
             <div style={{ display: 'flex', gap: 16, marginTop: 6, flexWrap: 'wrap' }}>
-              {[['Run', C.hrv], ['Cross-train', C.left], ['Physio', C.warn], ['Rest', C.muted]].map(([l, c]) => (
+              {[['Run', C.hrv], ['Workout', C.left], ['Physio', C.warn]].map(([l, c]) => (
                 <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <div style={{ width: 12, height: 12, background: c, borderRadius: 2 }} />
                   <span style={{ fontSize: 10, color: C.textDim, fontFamily: SANS }}>{l}</span>
@@ -853,7 +857,7 @@
             <div style={{ marginBottom: 16 }}>
               <LabelRow>Activities (select all that apply)</LabelRow>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {['Run','Cross-train','Strength','Rest','Physio session'].map(type => {
+                {['Physio session','Rest'].map(type => {
                   const sel = (form.activityTypes || []).includes(type);
                   return (
                     <button key={type} onClick={() => toggleActivity(type)} style={{
@@ -1148,6 +1152,106 @@
       );
     }
 
+    // ─── SYNC SETUP ────────────────────────────────────────────────────────
+
+    const APPS_SCRIPT_CODE = `function doGet(e) {
+  if (e && e.parameter && e.parameter._action === 'getGarmin') {
+    return getHealthData();
+  }
+  var sh = getOrCreate('AppSync');
+  var v = sh.getRange('A1').getValue();
+  return ContentService.createTextOutput(v || '{}').setMimeType(ContentService.MimeType.JSON);
+}
+function getHealthData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var wsh = ss.getSheetByName('Wellness & Garmin');
+  var hrvData = [], sleepData = [];
+  if (wsh) {
+    var rows = wsh.getDataRange().getValues();
+    if (rows.length >= 2) {
+      var h = rows[0].map(function(v){ return String(v).toLowerCase().trim(); });
+      var idIdx=h.indexOf('id'), hrvIdx=h.indexOf('hrv'), secsIdx=h.indexOf('sleepsecs'), scoreIdx=h.indexOf('sleepscore');
+      for (var i=1; i<rows.length; i++) {
+        var row=rows[i], date=String(row[idIdx]||'').trim();
+        if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) continue;
+        var hrv=parseFloat(row[hrvIdx]), secs=parseFloat(row[secsIdx]), score=parseFloat(row[scoreIdx]);
+        if (hrv>0&&!isNaN(hrv)) hrvData.push({date:date,hrv:Math.round(hrv)});
+        if (secs>0&&!isNaN(secs)){var e={date:date,sleepHours:Math.round(secs/360)/10};if(score>0&&!isNaN(score))e.sleepScore=Math.round(score);sleepData.push(e);}
+      }
+    }
+  }
+  var ash = ss.getSheetByName('Activities');
+  var activitiesData = [];
+  if (ash) {
+    var arows = ash.getDataRange().getValues();
+    if (arows.length >= 2) {
+      var ah = arows[0].map(function(v){ return String(v).trim(); });
+      var dtIdx=ah.indexOf('start_date_local'), tpIdx=ah.indexOf('type'), nmIdx=ah.indexOf('name'), dsIdx=ah.indexOf('distance'), mtIdx=ah.indexOf('moving_time'), ldIdx=ah.indexOf('icu_training_load');
+      for (var i=1; i<arows.length; i++) {
+        var row=arows[i];
+        var dateStr=String(row[dtIdx]||'').trim();
+        if (!dateStr) continue;
+        var date=dateStr.substring(0,10);
+        if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) continue;
+        activitiesData.push({date:date,type:String(row[tpIdx]||'').trim(),name:String(row[nmIdx]||'').trim(),distance:parseFloat(row[dsIdx])||0,movingTime:parseInt(row[mtIdx])||0,load:parseFloat(row[ldIdx])||0});
+      }
+    }
+  }
+  return ContentService.createTextOutput(JSON.stringify({hrvData:hrvData,sleepData:sleepData,activitiesData:activitiesData})).setMimeType(ContentService.MimeType.JSON);
+}
+function doPost(e) {
+  var data = JSON.parse(e.postData.contents);
+  if (data._action === 'appendCheckin') {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName('Health Checkin');
+    if (!sh) sh = ss.insertSheet('Health Checkin');
+    if (sh.getLastRow() === 0) {
+      sh.appendRow(['Date','Time','HRV','Stress','Feeling','Coffee','Pain R','Pain L','Sleep h','Sleep Score','Activities','Notes']);
+    }
+    sh.appendRow([data.date,data.time,data.hrv,data.workStress,data.feeling,data.coffee,data.painR,data.painL,data.sleepHours,data.sleepScore,(data.activityTypes||[]).join(', '),data.notes]);
+    return ContentService.createTextOutput('{"ok":true}').setMimeType(ContentService.MimeType.JSON);
+  }
+  var sh = getOrCreate('AppSync');
+  sh.getRange('A1').setValue(e.postData.contents);
+  sh.getRange('B1').setValue(new Date().toISOString());
+  return ContentService.createTextOutput('{"ok":true}').setMimeType(ContentService.MimeType.JSON);
+}
+function getOrCreate(name) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  return ss.getSheetByName(name) || ss.insertSheet(name);
+}`;
+
+    function SyncSetup({ syncUrl, onSave, onClose }) {
+      const [url, setUrl] = React.useState(syncUrl || '');
+      const [copied, setCopied] = React.useState(false);
+      const copyScript = () => {
+        navigator.clipboard.writeText(APPS_SCRIPT_CODE).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+      };
+      return (
+        <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.45)', zIndex:200, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+          <div style={{ background:'#fff', border:`1px solid ${C.border}`, borderRadius:12, padding:24, maxWidth:560, width:'100%', maxHeight:'90vh', overflowY:'auto' }}>
+            <div style={{ fontSize:13, fontFamily:C.SANS, fontWeight:700, color:C.text, marginBottom:16 }}>☁ Cloud Sync Setup</div>
+            <div style={{ fontSize:11, color:C.textDim, fontFamily:'sans-serif', marginBottom:12, lineHeight:1.6 }}>
+              1. Open your Health Metrics Google Sheet → <b>Extensions → Apps Script</b><br/>
+              2. Select all, paste the code below, save and deploy as web app (Execute as: Me, Anyone can access)<br/>
+              3. Paste the deployment URL here
+            </div>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+              <span style={{ fontSize:10, color:C.textDim, fontFamily:'monospace', textTransform:'uppercase', letterSpacing:1 }}>Apps Script Code</span>
+              <button onClick={copyScript} style={{ fontSize:11, padding:'4px 10px', background: copied ? C.hrv+'22' : C.surface2, border:`1px solid ${copied ? C.hrv : C.border}`, color: copied ? C.hrv : C.textDim, borderRadius:4, cursor:'pointer', fontFamily:'monospace' }}>{copied ? '✓ Copied' : 'Copy'}</button>
+            </div>
+            <pre style={{ background:C.surface2, border:`1px solid ${C.border}`, borderRadius:6, padding:10, fontSize:9, fontFamily:'monospace', overflowX:'auto', maxHeight:160, marginBottom:16, whiteSpace:'pre-wrap', wordBreak:'break-all' }}>{APPS_SCRIPT_CODE}</pre>
+            <div style={{ fontSize:11, color:C.textDim, fontFamily:'sans-serif', marginBottom:6 }}>Deployment URL</div>
+            <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://script.google.com/macros/s/..." style={{ width:'100%', fontSize:12, padding:'8px 10px', border:`1px solid ${C.border}`, borderRadius:6, marginBottom:16, fontFamily:'monospace' }} />
+            <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+              <button onClick={onClose} style={{ padding:'8px 16px', background:C.surface2, border:`1px solid ${C.border}`, borderRadius:6, cursor:'pointer', fontSize:12 }}>Cancel</button>
+              <button onClick={() => onSave(url)} style={{ padding:'8px 16px', background:C.left, border:'none', borderRadius:6, cursor:'pointer', fontSize:12, color:'#fff', fontWeight:600 }}>Save</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     // ─── APP ───────────────────────────────────────────────────────────────
 
     function App() {
@@ -1162,6 +1266,7 @@
       const [alcoholLog, setAlcoholLog] = useState(() => store.get('alcoholLog') || []);
       const [hrvSheet, setHrvSheet] = useState(() => store.get('hrvData') || []);
       const [sleepSheet, setSleepSheet] = useState(() => store.get('sleepData') || []);
+      const [activitiesSheet, setActivitiesSheet] = useState(() => store.get('activitiesData') || []);
       const [syncState, setSyncState] = useState({ loading: false, lastSync: store.get('lastSync'), error: null });
       const [storageErr, setStorageErr] = useState(null);
       const [syncUrl, setSyncUrl] = useState(() => store.get('syncUrl') || '');
@@ -1182,12 +1287,13 @@
       const doSync = useCallback(async () => {
         setSyncState(s => ({ ...s, loading: true, error: null }));
         try {
-          const { hrvData, sleepData } = await syncGarmin(latestSyncUrl.current);
+          const { hrvData, sleepData, activitiesData } = await syncGarmin(latestSyncUrl.current);
           const lastSync = new Date().toISOString();
           setHrvSheet(hrvData);
           store.set('hrvData', hrvData);
           setSleepSheet(sleepData);
           store.set('sleepData', sleepData);
+          if (activitiesData.length > 0) { setActivitiesSheet(activitiesData); store.set('activitiesData', activitiesData); }
           store.set('lastSync', lastSync);
           setSyncState({ loading: false, lastSync, error: null });
         } catch (e) {
@@ -1361,7 +1467,7 @@
           </div>
 
           {/* Content */}
-          {activeTab === 'dashboard' && <Dashboard checkins={checkins} hrvSheet={hrvSheet} sleepSheet={sleepSheet} alcoholLog={alcoholLog} />}
+          {activeTab === 'dashboard' && <Dashboard checkins={checkins} hrvSheet={hrvSheet} sleepSheet={sleepSheet} alcoholLog={alcoholLog} activitiesSheet={activitiesSheet} />}
           {activeTab === 'checkin' && <CheckIn checkins={checkins} setCheckins={setCheckins} hrvSheet={hrvSheet} syncUrl={syncUrl} sleepSheet={sleepSheet} alcoholLog={alcoholLog} setAlcoholLog={setAlcoholLog} editTarget={editTarget} clearEditTarget={() => setEditTarget(null)} />}
           {activeTab === 'runprotocol' && <RunProtocol runProtocol={runProtocol} setRunProtocol={setRunProtocol} checkins={checkins} />}
           {activeTab === 'history' && <History checkins={checkins} sleepSheet={sleepSheet} alcoholLog={alcoholLog} onEdit={handleEditCheckin} />}
