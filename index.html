@@ -394,6 +394,7 @@
       }, [checkins, td]);
 
       const RUN_TYPES = ['Run','VirtualRun','TrailRun'];
+      const GYM_TYPES = ['WeightTraining','Workout','Crossfit','Elliptical','StairStepper','RockClimbing','Yoga','Stretching','IndoorCycling'];
       const weekLoad = useMemo(() => {
         const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
         return Array.from({ length: 7 }, (_, i) => {
@@ -402,7 +403,8 @@
           // From Garmin/intervals.icu activities sheet
           const dayActs = activitiesSheet.filter(a => a.date === date);
           const hasRun = dayActs.some(a => RUN_TYPES.includes(a.type));
-          const hasWorkout = dayActs.some(a => !RUN_TYPES.includes(a.type));
+          const hasGym = dayActs.some(a => GYM_TYPES.includes(a.type));
+          const hasCrossTrain = dayActs.some(a => !RUN_TYPES.includes(a.type) && !GYM_TYPES.includes(a.type));
           // Manual entries from check-in (Physio, Rest)
           const cis = dayCIs(checkins, date);
           const manualActs = cis.flatMap(ci => ci.activityTypes || []);
@@ -410,7 +412,8 @@
           return {
             label: dayNames[d.getDay()],
             Run: hasRun ? 1 : 0,
-            Workout: hasWorkout ? 1 : 0,
+            Gym: hasGym ? 1 : 0,
+            'Cross-train': hasCrossTrain ? 1 : 0,
             Physio: hasPhysio ? 1 : 0,
           };
         });
@@ -544,12 +547,13 @@
                 <YAxis allowDecimals={false} domain={[0, 4]} tick={{ fontSize: 9, fill: C.textDim, fontFamily: MONO }} width={25} />
                 <Tooltip content={<Tip />} />
                 <Bar dataKey="Run" name="Run" stackId="a" fill={C.hrv} radius={0} />
-                <Bar dataKey="Workout" name="Workout" stackId="a" fill={C.left} radius={0} />
+                <Bar dataKey="Gym" name="Gym" stackId="a" fill="#7c3aed" radius={0} />
+                <Bar dataKey="Cross-train" name="Cross-train" stackId="a" fill={C.left} radius={0} />
                 <Bar dataKey="Physio" name="Physio" stackId="a" fill={C.warn} radius={[4,4,0,0]} />
               </BarChart>
             </ResponsiveContainer>
             <div style={{ display: 'flex', gap: 16, marginTop: 6, flexWrap: 'wrap' }}>
-              {[['Run', C.hrv], ['Workout', C.left], ['Physio', C.warn]].map(([l, c]) => (
+              {[['Run', C.hrv], ['Gym', '#7c3aed'], ['Cross-train', C.left], ['Physio', C.warn]].map(([l, c]) => (
                 <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <div style={{ width: 12, height: 12, background: c, borderRadius: 2 }} />
                   <span style={{ fontSize: 10, color: C.textDim, fontFamily: SANS }}>{l}</span>
