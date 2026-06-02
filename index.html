@@ -104,11 +104,12 @@
           const resp = await fetch(appsScriptUrl + '?action=getGarmin&t=' + Date.now(), { redirect: 'follow' });
           if (resp.ok) {
             const json = await resp.json();
+            console.log('[syncGarmin] Apps Script response:', { hrv: json.hrvData?.length, sleep: json.sleepData?.length, activities: json.activitiesData?.length });
             if (Array.isArray(json.hrvData) && Array.isArray(json.sleepData) && json.hrvData.length + json.sleepData.length > 0) {
               return { hrvData: json.hrvData, sleepData: json.sleepData, activitiesData: json.activitiesData || [] };
             }
           }
-        } catch (e) { /* fall through to CSV */ }
+        } catch (e) { console.log('[syncGarmin] Apps Script error:', e); /* fall through to CSV */ }
       }
       // Fallback: public CSV (no activities data available)
       const resp = await fetch(GARMIN_URL + '&_=' + Date.now(), { credentials: 'omit', cache: 'no-store' });
@@ -1412,6 +1413,7 @@ function getOrCreate(name) {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 {syncState.error && <span style={{ fontSize: 10, color: C.warn, fontFamily: MONO }}>⚠ HRV failed</span>}
+                <span style={{ fontSize: 10, color: activitiesSheet.length > 0 ? C.hrv : C.muted, fontFamily: MONO }}>{activitiesSheet.length} acts</span>
                 <button onClick={doSync} disabled={syncState.loading} style={{
                   background: 'transparent', border: `1px solid ${C.border}`,
                   color: C.textDim, padding: '4px 10px', fontSize: 10, fontFamily: MONO,
