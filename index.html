@@ -56,11 +56,13 @@
     const SANS = "'Montserrat', system-ui, sans-serif";
 
     const RUN_WEEKS = [
-      { week: 1, run: 1, walk: 2, reps: 10, freq: 3 },
-      { week: 2, run: 2, walk: 2, reps: 8, freq: 3 },
-      { week: 3, run: 3, walk: 1, reps: 6, freq: 3 },
-      { week: 4, run: null, walk: null, reps: null, freq: 3, desc: 'Continuous running, progressive duration' },
+      { week: 1, run: 2, walk: 1, reps: 10, freq: 3 },
+      { week: 2, run: 3, walk: 1, reps: 8,  freq: 3 },
+      { week: 3, run: 5, walk: 1, reps: 6,  freq: 3 },
+      { week: 4, run: 8, walk: 1, reps: 4,  freq: 3 },
+      { week: 5, run: null, walk: null, reps: null, freq: 3, desc: 'Continuous running, progressive duration' },
     ];
+    const RUN_PROTOCOL_VERSION = 2;
 
     // ─── STORAGE ───────────────────────────────────────────────────────────
 
@@ -270,11 +272,6 @@
         const dc = b.date.localeCompare(a.date);
         return dc !== 0 ? dc : (b.time || '').localeCompare(a.time || '');
       });
-      let rStreak = 0;
-      for (const c of sorted) { if ((c.painR ?? 99) <= 2) rStreak++; else break; }
-      if (rStreak >= 4) out.push(`Right knee pain ≤2 for ${rStreak} days — earliest Week 1 run: ${fmtShort(addDays(today(), 1))}`);
-      else if (rStreak > 0) out.push(`Right knee: ${rStreak} day${rStreak > 1 ? 's' : ''} ≤2/10 — need ${4 - rStreak} more for run eligibility`);
-      else out.push('Right knee pain >2 — run protocol on hold');
       const r3 = sorted.slice(0, 3);
       if (r3.length === 3 && r3.every(c => (c.hrv ?? 99) < 50 && (c.workStress ?? 0) >= 4))
         out.push(`HRV suppressed + work stress ≥4 for 3 days — stress-compounded recovery`);
@@ -284,6 +281,13 @@
           const delta = latest.hrv - HRV_BASELINE;
           out.push(`Latest HRV ${latest.hrv}ms (${delta > 0 ? '+' : ''}${delta} vs ${HRV_BASELINE}ms baseline)`);
         } else out.push(`Log daily HRV to unlock trend insights`);
+      }
+      // Pain trend
+      const last5 = sorted.slice(0, 5).filter(c => c.painR != null);
+      if (last5.length >= 3) {
+        const avg = last5.reduce((s, c) => s + (c.painR ?? 0), 0) / last5.length;
+        if (avg > 3) out.push(`Right knee avg pain ${avg.toFixed(1)}/10 over last ${last5.length} check-ins — monitor closely`);
+        else if (avg <= 1) out.push(`Right knee pain low (avg ${avg.toFixed(1)}/10) — good to train`);
       }
       return out.slice(0, 3);
     }
@@ -911,7 +915,7 @@
       const weekSessions = sessions.filter(s => s.week === currentWeek);
       const completedSessions = weekSessions.filter(s => s.completed);
       const weekDef = RUN_WEEKS[Math.min(currentWeek - 1, RUN_WEEKS.length - 1)];
-      const canAdvance = completedSessions.length >= 3 && currentWeek < 4;
+      const canAdvance = completedSessions.length >= 3 && currentWeek < RUN_WEEKS.length;
 
       const logSession = () => {
         const ci = checkins.find(c => c.date === td);
@@ -920,15 +924,23 @@
         const regressed = painR > 2 || painL > 2;
         const sessionNum = weekSessions.length + 1;
         const newSession = { date: td, week: currentWeek, sessionNum, painR, painL, completed: !regressed, regressed };
-        const updated = { ...runProtocol, sessions: [...sessions, newSession] };
+        const updated = { ...runProtocol, sessions: [...sessions, newSession], version: RUN_PROTOCOL_VERSION };
         setRunProtocol(updated);
         store.set('runProtocol', updated);
       };
 
       const advanceWeek = () => {
-        const updated = { ...runProtocol, currentWeek: currentWeek + 1 };
+        const updated = { ...runProtocol, currentWeek: currentWeek + 1, version: RUN_PROTOCOL_VERSION };
         setRunProtocol(updated);
         store.set('runProtocol', updated);
+      };
+
+      const resetProtocol = () => {
+        if (!window.confirm('Reset run protocol? All session history will be cleared.')) return;
+        const updated = { currentWeek: 1, sessions: [], version: RUN_PROTOCOL_VERSION };
+        setRunProtocol(updated);
+        store.set('runProtocol', updated);
+        store.set('runPromptDismissed', []);
       };
 
       return (
@@ -1012,6 +1024,11 @@
                   fontFamily: MONO, cursor: 'pointer', borderRadius: 2
                 }}>ADVANCE TO WEEK {currentWeek + 1} →</button>
               )}
+              <button onClick={resetProtocol} style={{
+                background: 'transparent', border: `1px solid ${C.border}`,
+                color: C.textDim, padding: '10px 20px', fontSize: 12,
+                fontFamily: MONO, cursor: 'pointer', borderRadius: 2
+              }}>↺ RESET</button>
             </div>
           </div>
 
@@ -1267,7 +1284,12 @@ function getOrCreate(name) {
         const raw = store.get('checkins') || [];
         return raw.map((ci, i) => normaliseCI(ci, i));
       });
-      const [runProtocol, setRunProtocol] = useState(() => store.get('runProtocol') || { currentWeek: 1, sessions: [] });
+      const [runProtocol, setRunProtocol] = useState(() => {
+        const stored = store.get('runProtocol') || {};
+        if (stored.version !== RUN_PROTOCOL_VERSION) return { currentWeek: 1, sessions: [], version: RUN_PROTOCOL_VERSION };
+        return stored;
+      });
+      const [runPrompt, setRunPrompt] = useState(null); // { date, activityName }
       const [alcoholLog, setAlcoholLog] = useState(() => store.get('alcoholLog') || []);
       const [hrvSheet, setHrvSheet] = useState(() => store.get('hrvData') || []);
       const [sleepSheet, setSleepSheet] = useState(() => store.get('sleepData') || []);
@@ -1327,6 +1349,17 @@ function getOrCreate(name) {
           })
           .catch(e => setCloudState(s => ({ ...s, syncing: false, error: e.message })));
       }, []); // eslint-disable-line
+
+      // Detect new Garmin runs and prompt to log in run protocol
+      useEffect(() => {
+        if (!activitiesSheet.length) return;
+        const td = today();
+        const todayRun = activitiesSheet.find(a => a.date === td && RUN_TYPES.includes(a.type));
+        if (!todayRun) return;
+        const alreadyLogged = (runProtocol.sessions || []).some(s => s.date === td);
+        const dismissed = (store.get('runPromptDismissed') || []).includes(td);
+        if (!alreadyLogged && !dismissed) setRunPrompt({ date: td, activityName: todayRun.name || todayRun.type });
+      }, [activitiesSheet]); // eslint-disable-line
 
       // Keep a ref to latest state so poll/visibility handlers always see fresh data
       const latestData = React.useRef({});
@@ -1477,6 +1510,41 @@ function getOrCreate(name) {
           {activeTab === 'checkin' && <CheckIn checkins={checkins} setCheckins={setCheckins} hrvSheet={hrvSheet} syncUrl={syncUrl} sleepSheet={sleepSheet} alcoholLog={alcoholLog} setAlcoholLog={setAlcoholLog} editTarget={editTarget} clearEditTarget={() => setEditTarget(null)} />}
           {activeTab === 'runprotocol' && <RunProtocol runProtocol={runProtocol} setRunProtocol={setRunProtocol} checkins={checkins} />}
           {activeTab === 'history' && <History checkins={checkins} sleepSheet={sleepSheet} alcoholLog={alcoholLog} onEdit={handleEditCheckin} />}
+
+          {/* Run prompt modal */}
+          {runPrompt && (
+            <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999, padding:20 }}>
+              <div style={{ background:C.surface, border:`1px solid ${C.border2}`, padding:24, maxWidth:340, width:'100%', borderRadius:4, boxShadow:'0 8px 32px rgba(0,0,0,0.18)' }}>
+                <div style={{ fontSize:13, color:C.text, fontFamily:SANS, fontWeight:600, marginBottom:6 }}>🏃 Run detected</div>
+                <div style={{ fontSize:12, color:C.textDim, fontFamily:MONO, marginBottom:18, lineHeight:1.6 }}>
+                  <b style={{color:C.text}}>{runPrompt.activityName}</b> was synced from Garmin.<br/>Count this towards your run protocol?
+                </div>
+                <div style={{ display:'flex', gap:10 }}>
+                  <button onClick={() => {
+                    // Log session in run protocol
+                    const td2 = runPrompt.date;
+                    const sessions = runProtocol.sessions || [];
+                    const currentWeek = runProtocol.currentWeek || 1;
+                    const weekSessions = sessions.filter(s => s.week === currentWeek);
+                    const sessionNum = weekSessions.length + 1;
+                    const newSession = { date: td2, week: currentWeek, sessionNum, painR: 0, painL: 0, completed: true, regressed: false, fromGarmin: true };
+                    const updated = { ...runProtocol, sessions: [...sessions, newSession], version: RUN_PROTOCOL_VERSION };
+                    setRunProtocol(updated); store.set('runProtocol', updated);
+                    setRunPrompt(null);
+                  }} style={{ flex:1, background:C.hrv+'22', border:`1px solid ${C.hrv}`, color:C.hrv, padding:'10px 0', fontSize:12, fontFamily:MONO, cursor:'pointer', borderRadius:2 }}>
+                    ✓ YES, COUNT IT
+                  </button>
+                  <button onClick={() => {
+                    const dismissed = store.get('runPromptDismissed') || [];
+                    store.set('runPromptDismissed', [...dismissed, runPrompt.date]);
+                    setRunPrompt(null);
+                  }} style={{ flex:1, background:'transparent', border:`1px solid ${C.border}`, color:C.textDim, padding:'10px 0', fontSize:12, fontFamily:MONO, cursor:'pointer', borderRadius:2 }}>
+                    NO, SKIP
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
